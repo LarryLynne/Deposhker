@@ -1,0 +1,130 @@
+:root {
+    --bg-body: #0f172a;       
+    --bg-sidebar: #1e293b; 
+    --text-main: #f1f5f9;     
+    --text-muted: #94a3b8;
+    --border: #334155;
+    --btn-hover: #475569;
+    --accent: #38bdf8;
+}
+
+body {
+    margin: 0; padding: 0;
+    font-family: 'Inter', sans-serif;
+    display: flex; height: 100vh;
+    background: var(--bg-body); color: var(--text-main);
+    overflow: hidden;
+}
+
+#sidebar {
+    width: 320px; flex-shrink: 0;
+    background: var(--bg-sidebar); padding: 20px;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 15px;
+    overflow-y: auto; box-sizing: border-box;
+    box-shadow: 4px 0 15px rgba(0,0,0,0.3); z-index: 3000;
+}
+
+#rightColumn { flex-grow: 1; position: relative; display: flex; }
+#map { flex-grow: 1; width: 100%; height: 100%; background: #0f172a; z-index: 1; }
+
+h2 { margin: 0; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 1.2px; color: var(--accent); }
+.card { background: #0f172a; border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+label { display: block; margin-bottom: 5px; font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
+
+input[type="text"], input[type="number"], select {
+    width: 100%; box-sizing: border-box; padding: 8px;
+    background: var(--bg-sidebar); border: 1px solid var(--border);
+    color: var(--text-main); border-radius: 4px; outline: none; margin-bottom: 5px;
+}
+
+.file-wrapper {
+    position: relative; overflow: hidden;
+    background: var(--bg-sidebar); border: 1px dashed var(--text-muted);
+    border-radius: 4px; padding: 15px; text-align: center; cursor: pointer; transition: 0.2s;
+}
+.file-wrapper:hover { border-color: var(--accent); }
+.file-wrapper input { position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+#fileName { font-size: 0.85rem; color: var(--text-muted); pointer-events: none; }
+
+button {
+    width: 100%; padding: 8px; margin-top: 5px;
+    background: var(--bg-sidebar); border: 1px solid var(--border);
+    color: var(--text-main); border-radius: 4px; cursor: pointer;
+    font-size: 0.8rem; text-transform: uppercase; font-weight: 600; transition: 0.2s;
+}
+button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
+.primary-btn { border-color: var(--accent); color: var(--accent); margin-top: 15px; }
+.primary-btn:hover { background: var(--accent); color: #000; }
+
+.status { font-size: 0.75rem; color: var(--text-muted); margin-top: 5px; }
+.status.ok { color: #4ade80; }
+.status.error { color: #ef4444; }
+
+.setting-row { display: flex; gap: 10px; }
+.setting-col { flex: 1; }
+.checkbox-group { display: flex; gap: 15px; }
+.checkbox-group label { text-transform: none; display: flex; align-items: center; gap: 5px; color: #fff; cursor: pointer;}
+
+.map-floating-logo { position: absolute; bottom: 25px; right: 25px; width: 80px; z-index: 5000; opacity: 0.7; pointer-events: none; }
+
+/* Кастомні іконки маркерів Leaflet */
+.depo-icon {
+    background: #000; color: #fff; border: 2px solid var(--accent);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: bold; font-size: 10px; text-align: center;
+}
+.point-marker { border-radius: 50%; border: 1px solid #000; }
+
+/* --- СТИЛІ ДЛЯ ГРАФІКА ТА МОДАЛЬНОГО ВІКНА --- */
+.chart-modal-overlay {
+    display: none; 
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: transparent; /* Прибрали затемнення */
+    z-index: 9999;
+    align-items: center; justify-content: center;
+}
+
+.chart-modal-box {
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 90%; max-width: 750px; 
+    padding: 20px;
+    /* Посилили тінь, щоб вікно виділялося без темного фону */
+    box-shadow: 0 15px 50px rgba(0,0,0,0.9);
+    animation: popIn 0.2s ease-out;
+}
+
+.chart-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px;
+}
+
+.chart-header h3 { margin: 0; color: var(--accent); }
+
+.close-btn {
+    cursor: pointer; color: var(--text-muted); font-size: 1.2rem; transition: 0.2s;
+}
+.close-btn:hover { color: #ef4444; }
+
+.chart-container {
+    position: relative; height: 300px; width: 100%;
+}
+
+@keyframes popIn {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+/* Темна тема для спливаючих вікон (Popup) Leaflet */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--bg-sidebar); 
+    color: var(--text-main);
+    border: 1px solid var(--border); 
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+.leaflet-popup-content { 
+    margin: 12px; 
+    line-height: 1.5; 
+}
