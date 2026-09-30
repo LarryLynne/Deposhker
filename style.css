@@ -133,3 +133,16 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
     margin: 12px; 
     line-height: 1.5; 
 }
+
+.template-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--accent);
+    text-decoration: none;
+    transition: 0.2s;
+}
+.template-link:hover {
+    color: #fff;
+    text-decoration: underline;
+}
