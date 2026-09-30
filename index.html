@@ -4,11 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Депошкер</title>
+    
+    <!-- 1. Базові стилі та шрифти -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
-    
+
+    <!-- 2. ОСНОВНА БІБЛІОТЕКА КАРТИ (Повинна бути першою!) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- 3. Плагіни для Leaflet (залежать від основного скрипта вище) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/OverlappingMarkerSpiderfier-Leaflet/0.2.6/oms.min.js"></script>
+    
+    <!-- 4. Інші бібліотеки -->
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -99,7 +109,23 @@
             </div>
         </div>
     </div>
-
+    <!-- Модалка масового перенесення -->
+    <div id="massMoveModal" class="chart-modal-overlay" onclick="if(event.target === this) closeMassMoveModal()">
+        <div class="chart-modal-box" style="max-width: 400px; text-align: center;">
+            <div class="chart-header">
+                <h3>Масове перенесення</h3>
+                <span class="close-btn" onclick="closeMassMoveModal()">✖</span>
+            </div>
+            <p style="color: var(--text-main); margin-bottom: 15px;">
+                Вибрано відділень: <b id="massMoveCount" style="color: var(--accent);">0</b>
+            </p>
+            <label style="text-align: left;">Оберіть нове Депо:</label>
+            <input list="mass-depo-list" id="massMoveDepoInput" class="smart-input" placeholder="Пошук депо...">
+            <datalist id="mass-depo-list"></datalist>
+            
+            <button class="primary-btn" onclick="applyMassMove()" style="margin-top: 20px;">ПЕРЕНЕСТИ</button>
+        </div>
+    </div>
     <script src="script.js"></script>
 </body>
 </html>
