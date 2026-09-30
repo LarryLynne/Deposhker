@@ -62,7 +62,12 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
 .status.error { color: #ef4444; }
 
 .setting-row { display: flex; gap: 10px; }
-.setting-col { flex: 1; }
+.setting-col { 
+    flex: 1; 
+    display: flex; 
+    flex-direction: column; 
+    justify-content: flex-end; 
+}
 .checkbox-group { display: flex; gap: 15px; }
 .checkbox-group label { text-transform: none; display: flex; align-items: center; gap: 5px; color: #fff; cursor: pointer;}
 

@@ -2,11 +2,12 @@
 const GAS_URL = "https://script.google.com/macros/s/AKfycbw165Z4yzi8xk8MEF5XnqE0LB2tANhIOBUcN-5nqG7bqoBBOTShYn2fAQQxh4S-Tj7mHw/exec"; 
 
 let map;
-let layers = { depo: L.layerGroup(), polygons: L.layerGroup(), points: L.layerGroup() };
+let layers = { depo: L.layerGroup(), polygons: L.layerGroup(), lines: L.layerGroup(), points: L.layerGroup() };
 let depoData = [];
 let rawPointsData = [];
 let filteredPoints = [];
 let workingDepo = [];
+let areaData = [];
 
 // Оновлена, більш контрастна палітра (без схожих відтінків підряд)
 const distinctColors = [
@@ -32,17 +33,22 @@ function initMap() {
     L.control.zoom({ position: 'topright' }).addTo(map);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OS' }).addTo(map);
     
-    // Порядок шарів: полігони знизу, потім депо, зверху точки
     layers.polygons.addTo(map);
+    layers.lines.addTo(map);
     layers.depo.addTo(map);
     layers.points.addTo(map);
     
-    const cached = localStorage.getItem('deposhker_depo_cache');
-    if (cached) {
-        depoData = JSON.parse(cached);
-        document.getElementById('depoStatus').innerHTML = `Завантажено з кешу (${depoData.length} шт)`;
+    const cachedDepo = localStorage.getItem('deposhker_depo_cache');
+    const cachedArea = localStorage.getItem('deposhker_area_cache'); // Читаем кэш площадей
+    
+    if (cachedArea) {
+        areaData = JSON.parse(cachedArea);
+    }
+
+    if (cachedDepo) {
+        depoData = JSON.parse(cachedDepo);
+        document.getElementById('depoStatus').innerHTML = `З кешу: ${depoData.length} депо, ${areaData.length} площ`;
         document.getElementById('depoStatus').className = 'status ok';
-        updateDepoSelect();
         drawMap();
     }
 }
@@ -58,7 +64,7 @@ async function fetchDepoData() {
         return;
     }
     
-    statusEl.innerText = 'Завантаження...';
+    statusEl.innerText = 'Завантаження Даних...';
     statusEl.className = 'status';
     
     try {
@@ -66,11 +72,16 @@ async function fetchDepoData() {
         const json = await response.json();
         
         if (json.status === 'success') {
-            depoData = json.data;
+            // Оновлена логіка під нову структуру JSON
+            depoData = json.data.depots;
+            areaData = json.data.areas || [];
+            
+            // Зберігаємо обидва масиви в кеш
             localStorage.setItem('deposhker_depo_cache', JSON.stringify(depoData));
-            statusEl.innerHTML = `Успішно (${depoData.length} шт)`;
+            localStorage.setItem('deposhker_area_cache', JSON.stringify(areaData));
+            
+            statusEl.innerHTML = `Успішно: ${depoData.length} депо, ${areaData.length} площ`;
             statusEl.className = 'status ok';
-            updateDepoSelect();
             drawMap();
         } else {
             throw new Error(json.message);
@@ -81,22 +92,18 @@ async function fetchDepoData() {
     }
 }
 
-function updateDepoSelect() {
-    const sel = document.getElementById('priorityDepo');
-    sel.innerHTML = '<option value="auto">Авто (Північ -> Південь)</option>';
-    depoData.forEach(d => {
-        const opt = document.createElement('option');
-        opt.value = d['Вузол'];
-        opt.innerText = d['Вузол'];
-        sel.appendChild(opt);
-    });
-}
 
+// 2. Читання Excel та відображення
 // 2. Читання Excel та відображення
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
     document.getElementById('fileName').innerText = file.name;
+    
+    // Перевірка, чи завантажені депо, оскільки вони потрібні для відновлення робочого стану
+    if (depoData.length === 0) {
+        alert("Увага: Спочатку завантажте дані Депо (Крок 1), інакше збережена сесія може завантажитись некоректно.");
+    }
     
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -105,28 +112,104 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const json = XLSX.utils.sheet_to_json(ws);
         
-        rawPointsData = json.map(r => ({
-            id: r['Вузол'] || r['ID'],
-            lat: parseFloat(r['Широта']),
-            lng: parseFloat(r['Довгота']),
-            hour: parseInt(r['Час'] || r['Година'] || 0),
-            dv: parseFloat(r['ДВ']) || 0,
-            p: parseFloat(r['П']) || 0,
-            v: parseFloat(r['В']) || 0
-        })).filter(r => !isNaN(r.lat) && !isNaN(r.lng));
-        
-        const uniquePoints = {};
-        rawPointsData.forEach(p => {
-            if (!uniquePoints[p.id]) {
-                uniquePoints[p.id] = { id: p.id, lat: p.lat, lng: p.lng, dv: 0, p: 0, v: 0, assigned: null, color: '#64748b' };
-            }
-        });
-        filteredPoints = Object.values(uniquePoints);
-        
-        document.getElementById('pointsStatus').innerHTML = `Завантажено рядків: ${rawPointsData.length}`;
-        document.getElementById('pointsStatus').className = 'status ok';
-        
-        drawMap();
+        // Визначаємо, чи це збережений файл результатів, чи сирі дані
+        const isSavedFile = json.length > 0 && json[0]['Призначене Депо'] !== undefined;
+
+        if (isSavedFile) {
+            // --- ВІДНОВЛЕННЯ ЗБЕРЕЖЕНОГО СТАНУ ---
+            
+            // 1. Відновлюємо базові точки (фіктивний час потрібен, щоб не впав перерозподіл, якщо юзер захоче його запустити)
+            rawPointsData = json.map(r => ({
+                id: r['Відділення (Вузол)'],
+                lat: parseFloat(r['Широта']),
+                lng: parseFloat(r['Довгота']),
+                hour: 10, 
+                dv: parseFloat(r['ДВ (сума)']) || 0,
+                p: parseFloat(r['П (сума)']) || 0,
+                v: parseFloat(r['В (сума)']) || 0
+            }));
+            
+            // 2. Відновлюємо розподілені точки зі всіма метаданими
+            filteredPoints = json.map(r => ({
+                id: r['Відділення (Вузол)'],
+                lat: parseFloat(r['Широта']),
+                lng: parseFloat(r['Довгота']),
+                dv: parseFloat(r['ДВ (сума)']) || 0,
+                p: parseFloat(r['П (сума)']) || 0,
+                v: parseFloat(r['В (сума)']) || 0,
+                assigned: r['Призначене Депо'] === "Не розподілено" ? null : r['Призначене Депо'],
+                color: r['Колір'] || '#64748b',
+                isStar: r['Є Зірочкою'] === 'Так',
+                assignedStar: r["Прив'язана Зірочка"] || null,
+                starChildren: 0 
+            }));
+            
+            // Відновлюємо лічильники кількості підлеглих у зірочок
+            filteredPoints.forEach(p => {
+                if (p.assignedStar) {
+                    const star = filteredPoints.find(s => s.id === p.assignedStar);
+                    if (star) star.starChildren++;
+                }
+            });
+
+            // 3. Відновлюємо робочий масив Депо (workingDepo)
+            const hStart = parseInt(document.getElementById('hourStart').value) || 10;
+            const hEnd = parseInt(document.getElementById('hourEnd').value) || 12;
+            const hoursMultiplier = Math.max(1, (hEnd - hStart) + 1);
+
+            workingDepo = depoData.map(d => ({
+                ...d,
+                color: '#38bdf8', // Колір за замовчуванням
+                capDV: (parseFloat(d['ДВ']) || 0) * hoursMultiplier,
+                capP: (parseFloat(d['П']) || 0) * hoursMultiplier,
+                capV: (parseFloat(d['В']) || 0) * hoursMultiplier,
+                curDV: 0, curP: 0, curV: 0
+            }));
+            
+            // Наповнюємо депо вантажами та кольорами з відновлених відділень
+            filteredPoints.forEach(p => {
+                if (p.assigned) {
+                    const depo = workingDepo.find(d => d['Вузол'] === p.assigned);
+                    if (depo) {
+                        depo.curDV += p.dv;
+                        depo.curP += p.p;
+                        depo.curV += p.v;
+                        depo.color = p.color; // Депо наслідує колір своїх точок
+                    }
+                }
+            });
+
+            document.getElementById('pointsStatus').innerHTML = `Відновлено сесію: ${filteredPoints.length} точок`;
+            document.getElementById('pointsStatus').className = 'status ok';
+            
+            // Одразу малюємо карту зі збереженими зонами
+            drawMap(workingDepo);
+
+        } else {
+            // --- ЗВИЧАЙНЕ ЗАВАНТАЖЕННЯ СИРИХ ДАНИХ (Стара логіка) ---
+            rawPointsData = json.map(r => ({
+                id: r['Вузол'] || r['ID'],
+                lat: parseFloat(r['Широта']),
+                lng: parseFloat(r['Довгота']),
+                hour: parseInt(r['Час'] || r['Година'] || 0),
+                dv: parseFloat(r['ДВ']) || 0,
+                p: parseFloat(r['П']) || 0,
+                v: parseFloat(r['В']) || 0
+            })).filter(r => !isNaN(r.lat) && !isNaN(r.lng));
+            
+            const uniquePoints = {};
+            rawPointsData.forEach(p => {
+                if (!uniquePoints[p.id]) {
+                    uniquePoints[p.id] = { id: p.id, lat: p.lat, lng: p.lng, dv: 0, p: 0, v: 0, assigned: null, color: '#64748b' };
+                }
+            });
+            filteredPoints = Object.values(uniquePoints);
+            
+            document.getElementById('pointsStatus').innerHTML = `Завантажено рядків: ${rawPointsData.length}`;
+            document.getElementById('pointsStatus').className = 'status ok';
+            
+            drawMap();
+        }
     };
     reader.readAsArrayBuffer(file);
 });
@@ -143,8 +226,10 @@ function runDistribution() {
     const useDV = document.getElementById('chkDV').checked;
     const useP = document.getElementById('chkP').checked;
     const useV = document.getElementById('chkV').checked;
-    const priorityId = document.getElementById('priorityDepo').value;
-    const algoType = document.getElementById('algoType').value;
+    
+    // Жорстко задані налаштування
+    const priorityId = 'auto';
+    const algoType = 'global';
 
     if (!useDV && !useP && !useV) return alert("Оберіть хоча б один тип вантажу!");
     if (hStart > hEnd) return alert("Невірний діапазон часу!");
@@ -177,135 +262,40 @@ function runDistribution() {
             curDV: 0, curP: 0, curV: 0
         }));
 
-    // Сортування депо (має значення в основному для послідовного алгоритму)
-    workingDepo.sort((a, b) => {
-        if (priorityId !== 'auto') {
-            if (a['Вузол'] === priorityId) return -1;
-            if (b['Вузол'] === priorityId) return 1;
-        }
-        return b['Широта'] - a['Широта']; 
+    // Сортування депо (Північ -> Південь)
+    workingDepo.sort((a, b) => b['Широта'] - a['Широта']);
+
+    // --- ФАЗА 1: РОЗПОДІЛ (Глобальна відстань) ---
+    let pairs = [];
+    filteredPoints.forEach(pt => {
+        const ptGeo = turf.point([pt.lng, pt.lat]);
+        workingDepo.forEach(depo => {
+            const dist = turf.distance(ptGeo, turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
+            pairs.push({ pt, depo, dist });
+        });
     });
 
-    // --- ФАЗА 1: РОЗПОДІЛ ЗА ЛІМІТАМИ ---
-    
-    if (algoType === 'sequential') {
-        // 1. Послідовний алгоритм
-        workingDepo.forEach(depo => {
-            let pool = filteredPoints.filter(p => !p.assigned);
-            const depoPt = turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]);
-            
-            pool.sort((a, b) => {
-                return turf.distance(depoPt, turf.point([a.lng, a.lat])) - turf.distance(depoPt, turf.point([b.lng, b.lat]));
-            });
+    pairs.sort((a, b) => a.dist - b.dist);
 
-            for (let pt of pool) {
-                let hitLimit = false;
-                if (useDV && (depo.curDV + pt.dv > depo.capDV)) hitLimit = true;
-                if (useP && (depo.curP + pt.p > depo.capP)) hitLimit = true;
-                if (useV && (depo.curV + pt.v > depo.capV)) hitLimit = true;
+    for (let pair of pairs) {
+        let { pt, depo } = pair;
+        if (pt.assigned) continue; 
 
-                if (hitLimit) break; 
+        let hitLimit = false;
+        if (useDV && (depo.curDV + pt.dv > depo.capDV)) hitLimit = true;
+        if (useP && (depo.curP + pt.p > depo.capP)) hitLimit = true;
+        if (useV && (depo.curV + pt.v > depo.capV)) hitLimit = true;
 
-                pt.assigned = depo['Вузол'];
-                pt.color = depo.color;
-                depo.curDV += pt.dv;
-                depo.curP += pt.p;
-                depo.curV += pt.v;
-            }
-        });
-    } 
-    else if (algoType === 'bubbles') {
-        // 2. Зростаючі бульбашки (крок 1 км)
-        const MAX_RADIUS = 200; // обмежувач, щоб не зациклитися
-        for (let radius = 1; radius <= MAX_RADIUS; radius++) {
-            let pool = filteredPoints.filter(p => !p.assigned);
-            if (pool.length === 0) break; // всі розподілені
-
-            let candidates = [];
-            
-            pool.forEach(pt => {
-                const ptGeo = turf.point([pt.lng, pt.lat]);
-                let bestDepo = null;
-                let minDist = Infinity;
-
-                workingDepo.forEach(depo => {
-                    // Перевіряємо, чи є ще місце в депо
-                    let hasSpace = true;
-                    if (useDV && depo.curDV >= depo.capDV) hasSpace = false;
-                    if (useP && depo.curP >= depo.capP) hasSpace = false;
-                    if (useV && depo.curV >= depo.capV) hasSpace = false;
-                    
-                    if (!hasSpace) return;
-
-                    const dist = turf.distance(ptGeo, turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
-                    // Якщо точка потрапляє в поточний радіус і вона ближче, ніж інші варіанти
-                    if (dist <= radius && dist < minDist) {
-                        minDist = dist;
-                        bestDepo = depo;
-                    }
-                });
-
-                if (bestDepo) {
-                    candidates.push({ pt, depo: bestDepo, dist: minDist });
-                }
-            });
-
-            // Сортуємо кандидатів за реальною відстанню, щоб вирішити конфлікти всередині одного кроку
-            candidates.sort((a, b) => a.dist - b.dist);
-
-            candidates.forEach(cand => {
-                let { pt, depo } = cand;
-                if (pt.assigned) return; // вже забрали на цьому кроці
-                
-                let hitLimit = false;
-                if (useDV && (depo.curDV + pt.dv > depo.capDV)) hitLimit = true;
-                if (useP && (depo.curP + pt.p > depo.capP)) hitLimit = true;
-                if (useV && (depo.curV + pt.v > depo.capV)) hitLimit = true;
-
-                if (!hitLimit) {
-                    pt.assigned = depo['Вузол'];
-                    pt.color = depo.color;
-                    depo.curDV += pt.dv;
-                    depo.curP += pt.p;
-                    depo.curV += pt.v;
-                }
-            });
-        }
-    }
-    else if (algoType === 'global') {
-        // 3. Глобальна відстань (математичний аналог бульбашок, але без кроків)
-        let pairs = [];
-        filteredPoints.forEach(pt => {
-            const ptGeo = turf.point([pt.lng, pt.lat]);
-            workingDepo.forEach(depo => {
-                const dist = turf.distance(ptGeo, turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
-                pairs.push({ pt, depo, dist });
-            });
-        });
-
-        // Сортуємо всі можливі пари "Відділення-Депо" від найменшої відстані до найбільшої
-        pairs.sort((a, b) => a.dist - b.dist);
-
-        for (let pair of pairs) {
-            let { pt, depo } = pair;
-            if (pt.assigned) continue; // точка вже має депо
-
-            let hitLimit = false;
-            if (useDV && (depo.curDV + pt.dv > depo.capDV)) hitLimit = true;
-            if (useP && (depo.curP + pt.p > depo.capP)) hitLimit = true;
-            if (useV && (depo.curV + pt.v > depo.capV)) hitLimit = true;
-
-            if (!hitLimit) {
-                pt.assigned = depo['Вузол'];
-                pt.color = depo.color;
-                depo.curDV += pt.dv;
-                depo.curP += pt.p;
-                depo.curV += pt.v;
-            }
+        if (!hitLimit) {
+            pt.assigned = depo['Вузол'];
+            pt.color = depo.color;
+            depo.curDV += pt.dv;
+            depo.curP += pt.p;
+            depo.curV += pt.v;
         }
     }
 
-    // --- ФАЗА 2: РОЗПОДІЛ ЗАЛИШКІВ (діє для всіх алгоритмів) ---
+    // --- ФАЗА 2: РОЗПОДІЛ ЗАЛИШКІВ ---
     let remainders = filteredPoints.filter(p => !p.assigned);
     remainders.forEach(pt => {
         const ptGeo = turf.point([pt.lng, pt.lat]);
@@ -320,7 +310,6 @@ function runDistribution() {
             if (useP && depo.capP > 0) maxOverload = Math.max(maxOverload, depo.curP / depo.capP);
             if (useV && depo.capV > 0) maxOverload = Math.max(maxOverload, depo.curV / depo.capV);
 
-            // Чим більший перевантаж, тим жорсткіший штраф на відстань
             const penalty = Math.pow(Math.max(0, maxOverload - 1), 2) * 50; 
             const score = dist * (1 + penalty);
 
@@ -343,12 +332,13 @@ function runDistribution() {
 }
 
 // --- ВИВАНТАЖЕННЯ В EXCEL ---
-function exportToExcel() {
+// --- ВИВАНТАЖЕННЯ В EXCEL ---
+window.exportToExcel = function() {
     if (!filteredPoints || filteredPoints.length === 0) {
         return alert("Немає даних для вивантаження! Спочатку завантажте файл.");
     }
 
-    // Формуємо масив об'єктів для Excel з потрібними назвами колонок
+    // Формуємо масив з розширеними метаданими
     const exportData = filteredPoints.map(p => ({
         "Відділення (Вузол)": p.id,
         "Широта": p.lat,
@@ -356,19 +346,21 @@ function exportToExcel() {
         "ДВ (сума)": p.dv,
         "П (сума)": p.p,
         "В (сума)": p.v,
-        "Призначене Депо": p.assigned || "Не розподілено"
+        "Призначене Депо": p.assigned || "Не розподілено",
+        "Колір": p.color || "",
+        "Є Зірочкою": p.isStar ? "Так" : "Ні",
+        "Прив'язана Зірочка": p.assignedStar || ""
     }));
 
-    // Створюємо книгу та аркуш
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Розподіл_Депо");
 
-    // Зберігаємо файл
     XLSX.writeFile(wb, "Депошкер_Результат.xlsx");
-}
+};
 
 // --- РУЧНЕ ПЕРЕМІЩЕННЯ ---
+// --- РУЧНЕ ПЕРЕМІЩЕННЯ МІЖ ДЕПО ---
 window.movePoint = function(pointId) {
     const sel = document.getElementById('move-sel-' + pointId);
     if (!sel) return;
@@ -379,35 +371,194 @@ window.movePoint = function(pointId) {
     const oldDepo = workingDepo.find(d => d['Вузол'] === pt.assigned);
 
     if (pt && newDepo && pt.assigned !== newDepoId) {
-        // Коригуємо завантаження старого депо
+        // 1. АВТОВІДВ'ЯЗУВАННЯ ВІД ЗІРОЧКИ
+        if (pt.assignedStar) {
+            const oldStar = filteredPoints.find(s => s.id === pt.assignedStar);
+            if (oldStar) oldStar.starChildren--;
+            pt.assignedStar = null;
+        }
+        
+        // Якщо сама точка була зірочкою, знімаємо статус і відв'язуємо її "дітей"
+        if (pt.isStar) {
+            pt.isStar = false;
+            pt.starChildren = 0;
+            filteredPoints.forEach(child => {
+                if (child.assignedStar === pt.id) child.assignedStar = null;
+            });
+        }
+
+        // 2. Коригуємо завантаження старого депо
         if (oldDepo) {
             oldDepo.curDV -= pt.dv;
             oldDepo.curP -= pt.p;
             oldDepo.curV -= pt.v;
         }
-        // Додаємо вантаж новому депо
+        // 3. Додаємо вантаж новому депо
         newDepo.curDV += pt.dv;
         newDepo.curP += pt.p;
         newDepo.curV += pt.v;
 
-        // Змінюємо прив'язку та колір точки
+        // 4. Змінюємо прив'язку та колір точки
         pt.assigned = newDepoId;
         pt.color = newDepo.color;
         
         map.closePopup();
-        drawMap(workingDepo); // Перемальовуємо карту з новими полігонами
+        drawMap(workingDepo); // Перемальовуємо карту
     }
 };
 
-// Малювання на карті (ОНОВЛЕНО З POPUP)
+// --- РУЧНЕ КЕРУВАННЯ ЗІРОЧКАМИ ---
+window.movePointStar = function(pointId) {
+    const sel = document.getElementById('move-star-sel-' + pointId);
+    if (!sel) return;
+
+    const newStarId = sel.value;
+    const pt = filteredPoints.find(p => p.id === pointId);
+
+    if (!pt || pt.isStar) return; // Зірочку не можна прив'язати до іншої зірочки
+
+    const oldStarId = pt.assignedStar;
+
+    if (oldStarId !== newStarId) {
+        // Віднімаємо лічильник від старої зірочки
+        if (oldStarId && oldStarId !== 'none') {
+            const oldStar = filteredPoints.find(s => s.id === oldStarId);
+            if (oldStar) oldStar.starChildren--;
+        }
+
+        // Додаємо до нової зірочки або просто скидаємо
+        if (newStarId !== 'none') {
+            const newStar = filteredPoints.find(s => s.id === newStarId);
+            if (newStar) newStar.starChildren++;
+            pt.assignedStar = newStarId;
+        } else {
+            pt.assignedStar = null; // Скинули зірочку
+        }
+
+        map.closePopup();
+        drawMap(workingDepo); // Перемальовуємо лінії
+    }
+};
+
+// --- АЛГОРИТМ РОЗПОДІЛУ ЗІРОЧОК ---
+window.distributeStars = function(depotId) {
+    // 1. Беремо налаштування з UI
+    const minArea = parseFloat(document.getElementById('starMinArea').value) || 150;
+    const maxStars = parseInt(document.getElementById('starMaxCount').value) || 15;
+    const maxPointsPerStar = parseInt(document.getElementById('starMaxPoints').value) || 15;
+
+    // 2. Знаходимо Депо
+    const depotInfo = depoData.find(d => d['Вузол'] === depotId);
+    if (!depotInfo) return;
+    const depotPt = turf.point([parseFloat(depotInfo['Довгота']), parseFloat(depotInfo['Широта'])]);
+
+    // 3. Беремо всі відділення, які вже прив'язані до цього Депо
+    let depotPoints = filteredPoints.filter(p => p.assigned === depotId);
+    
+    // Скидаємо попередні налаштування зірочок для цієї зони (якщо користувач натиснув вдруге)
+    depotPoints.forEach(p => { p.isStar = false; p.assignedStar = null; });
+
+    // 4. Шукаємо кандидатів у Зірочки (за площею)
+    let potentialStars = [];
+    depotPoints.forEach(p => {
+        const areaInfo = areaData.find(a => String(a['Вузол']) === String(p.id));
+        // В таблиці колонка називається "Площа"
+        const area = areaInfo ? parseFloat(areaInfo['Площа']) : 0; 
+        
+        if (area >= minArea) {
+            potentialStars.push({ 
+                pt: p, 
+                area: area, 
+                dist: turf.distance(depotPt, turf.point([p.lng, p.lat])) 
+            });
+        }
+    });
+
+    // Сортуємо: чим більша площа, тим вищий пріоритет
+    potentialStars.sort((a, b) => b.area - a.area);
+    
+    // Відрізаємо зайві по ліміту (maxStars)
+    let actualStars = potentialStars.slice(0, maxStars).map(s => s.pt);
+    actualStars.forEach(s => { s.isStar = true; s.starChildren = 0; });
+
+    // 5. Розподіляємо ЗАЛИШКИ (відділення, що не стали зірочками)
+    let regularPoints = depotPoints.filter(p => !p.isStar);
+
+    regularPoints.forEach(pt => {
+        const ptGeo = turf.point([pt.lng, pt.lat]);
+        const distDepotToPt = turf.distance(depotPt, ptGeo);
+        const bearingDepotToPt = turf.bearing(depotPt, ptGeo); // Вектор (кут) від Депо до Точки
+
+        let bestStar = null;
+        let minStarDist = Infinity;
+
+        actualStars.forEach(star => {
+            if (star.starChildren >= maxPointsPerStar) return; // Ліміт переповнено
+
+            const starGeo = turf.point([star.lng, star.lat]);
+            const distDepotToStar = turf.distance(depotPt, starGeo);
+            
+            // ПРАВИЛО 1: Точка має бути ДАЛІ ВІД ДЕПО, ніж Зірочка (щоб не повертатися назад)
+            if (distDepotToPt > distDepotToStar) {
+                const bearingDepotToStar = turf.bearing(depotPt, starGeo);
+                
+                // ПРАВИЛО 2: Вектор. Різниця кутів (азимутів). Беремо дельту в межах 35 градусів.
+                let diff = Math.abs(bearingDepotToPt - bearingDepotToStar);
+                if (diff > 180) diff = 360 - diff; // Коригування переходу через полюс (-180/180)
+
+                if (diff <= 35) { // Входить в "конус" напрямку
+                    const distStarToPt = turf.distance(starGeo, ptGeo);
+                    // Вибираємо найближчу зірочку на цьому векторі
+                    if (distStarToPt < minStarDist) {
+                        minStarDist = distStarToPt;
+                        bestStar = star;
+                    }
+                }
+            }
+        });
+
+        // Якщо знайшли підходящу зірочку - прив'язуємо
+        if (bestStar) {
+            pt.assignedStar = bestStar.id;
+            bestStar.starChildren++;
+        }
+    });
+
+    // 6. Перемальовуємо карту з новими зв'язками
+    map.closePopup();
+    drawMap(workingDepo);
+};
+
+// --- ЗМІНА КОЛЬОРУ ЗОНИ ---
+window.changeDepoColor = function(depoId, newColor) {
+    if (!workingDepo || workingDepo.length === 0) return;
+
+    // Шукаємо депо в робочому масиві
+    const depo = workingDepo.find(d => d['Вузол'] === depoId);
+    if (depo) {
+        depo.color = newColor; // Оновлюємо колір депо
+        
+        // Оновлюємо колір усіх відділень, що належать до цього депо
+        filteredPoints.forEach(p => {
+            if (p.assigned === depoId) {
+                p.color = newColor;
+            }
+        });
+        
+        // Перемальовуємо карту з новими кольорами
+        drawMap(workingDepo);
+    }
+};
+
+// Малювання на карті
 function drawMap(processedDepo = null) {
     layers.depo.clearLayers();
     layers.points.clearLayers();
     layers.polygons.clearLayers();
+    layers.lines.clearLayers(); 
 
     const dList = processedDepo || depoData;
 
-    // 1. Полігони
     // 1. Полігони
     if (processedDepo) {
         processedDepo.forEach(depo => {
@@ -421,19 +572,11 @@ function drawMap(processedDepo = null) {
                 let hull = turf.convex(fc);
                 
                 if (hull) {
-                    // 1. Відступаємо від крайніх точок на 1 кілометр назовні
                     hull = turf.buffer(hull, 0.3, { units: 'kilometers' });
-                    
-                    // 2. Згладжуємо лінії, роблячи полігон плавним (2 ітерації)
                     hull = turf.polygonSmooth(hull, { iterations: 2 });
 
                     L.geoJSON(hull, {
-                        style: { 
-                            color: depo.color, 
-                            weight: 4,          
-                            opacity: 1,         
-                            fillOpacity: 0.3    
-                        }
+                        style: { color: depo.color, weight: 4, opacity: 1, fillOpacity: 0.3 }
                     }).addTo(layers.polygons);
                 }
             }
@@ -444,50 +587,46 @@ function drawMap(processedDepo = null) {
     depoData.forEach(d => {
         const isOff = d.isActive === false;
         
-        // Стилі залежно від статусу
         const bgColor = isOff ? '#334155' : '#0f172a';
         const borderColor = isOff ? '#64748b' : '#38bdf8';
         const opacity = isOff ? 0.6 : 1;
 
-        // Внутрішній div розтягується на 100% батьківського контейнера, 
-        // текст жорстко центрується без відступів
         const iconHtml = `<div style="
-            background: ${bgColor}; 
-            color: #fff; 
-            border: 2px solid ${borderColor}; 
-            opacity: ${opacity}; 
-            border-radius: 50%; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            font-weight: bold; 
-            font-size: 10px; 
-            width: 100%; 
-            height: 100%; 
-            box-sizing: border-box; 
-            margin: 0; 
-            padding: 0; 
-            line-height: 1;
-            white-space: nowrap;
-        ">${d['Вузол']}</div>`;
+            background: ${bgColor}; color: #fff; border: 2px solid ${borderColor}; 
+            opacity: ${opacity}; border-radius: 50%; display: flex; align-items: center; 
+            justify-content: center; font-weight: bold; font-size: 10px; width: 100%; 
+            height: 100%; box-sizing: border-box; margin: 0; padding: 0; 
+            line-height: 1; white-space: nowrap;">${d['Вузол']}</div>`;
 
-        // Задаємо розмір 36х36 (щоб влізли довгі назви) та чіткі координати центрів
         const icon = L.divIcon({ 
-            className: '', 
-            html: iconHtml, 
-            iconSize: [36, 36], 
-            iconAnchor: [18, 18],   // Центруємо саму іконку точно по координатам
-            popupAnchor: [0, -18]   // Попап з меню буде відкриватися рівно над іконкою
+            className: '', html: iconHtml, iconSize: [36, 36], 
+            iconAnchor: [18, 18], popupAnchor: [0, -18]
         });
         
         const marker = L.marker([d['Широта'], d['Довгота']], {icon});
         
-        // HTML для Popup меню
+        // Визначаємо поточний колір депо (якщо розподіл вже був)
+        const workDepoInfo = workingDepo ? workingDepo.find(wd => wd['Вузол'] === d['Вузол']) : null;
+        const currentColor = workDepoInfo ? workDepoInfo.color : '#38bdf8'; 
+        const isDistributed = !!workDepoInfo; // Перевірка, чи можна змінювати колір
+
+        // HTML для Popup меню (ДОДАНО ПІКЕР КОЛЬОРУ)
         const popupHtml = `
-            <div style="text-align:center; min-width: 140px;">
+            <div style="text-align:center; min-width: 150px;">
                 <b style="color: ${isOff ? '#94a3b8' : '#f1f5f9'}">${d['Вузол']}</b><br>
                 <hr style="margin:8px 0; border-color:#334155;">
                 
+                ${isDistributed ? `
+                <div style="margin-bottom: 8px; text-align: left; font-size: 0.75rem; color: #94a3b8; display:flex; align-items:center; justify-content:space-between;">
+                    Колір зони: 
+                    <input type="color" value="${currentColor}" onchange="changeDepoColor('${d['Вузол']}', this.value)" style="width:40px; height: 25px; border:none; padding: 0; background: transparent; cursor: pointer;">
+                </div>
+                ` : ''}
+
+                <button onclick="distributeStars('${d['Вузол']}')" style="width:100%; padding:6px; background:#eab308; color:#000; border:none; border-radius:4px; cursor:pointer; font-weight:bold; margin-bottom:8px;" ${isOff || !isDistributed ? 'disabled' : ''}>
+                    🌟 Шукати Зірочки
+                </button>
+
                 <button onclick="toggleDepo('${d['Вузол']}')" style="width:100%; padding:6px; background:${isOff ? '#4ade80' : '#ef4444'}; color:${isOff ? '#000' : '#fff'}; border:none; border-radius:4px; cursor:pointer; font-weight:bold; margin-bottom:8px;">
                     ${isOff ? 'ВКЛЮЧИТИ' : 'ВИКЛЮЧИТИ'}
                 </button>
@@ -498,28 +637,59 @@ function drawMap(processedDepo = null) {
             </div>
         `;
         
-        // Leaflet за замовчуванням відкриває bindPopup саме ПО КЛІКУ
         marker.bindPopup(popupHtml);
-        
         marker.addTo(layers.depo);
     });
 
-    // 3. Точки відділень (з можливістю кліку)
+    // 3. Точки відділень та Зірочки
     filteredPoints.forEach(p => {
         const col = p.color || '#64748b';
-        const icon = L.divIcon({
-            className: '',
-            html: `<div class="point-marker" style="
-                background:${col}; 
-                width:14px; 
-                height:14px; 
-                border: 2px solid #ffffff; 
-                border-radius: 50%;
-                box-shadow: 0 0 4px rgba(0,0,0,0.6);"></div>`,
-            iconSize: [18, 18] 
-        });
+        let iconHtml, iconSize;
+        let zIndexOffset = 0;
+
+        // --- ВІЗУАЛІЗАЦІЯ ЗІРОЧОК (Колір зони) ---
+        if (p.isStar) {
+            iconHtml = `<div style="
+                background:${p.color}; width:20px; height:20px; border: 2px solid #fff; 
+                border-radius: 50%; box-shadow: 0 0 10px ${p.color}; display:flex; 
+                align-items:center; justify-content:center; font-size:12px; text-shadow: 1px 1px 2px #000;">⭐</div>`;
+            iconSize = [24, 24];
+            zIndexOffset = 1000; 
+        } else {
+            // Обводка кольором зони, якщо належить до зірочки
+            const isAssignedToStar = p.assignedStar ? p.color : '#ffffff'; 
+            iconHtml = `<div class="point-marker" style="
+                background:${col}; width:14px; height:14px; 
+                border: 2px solid ${isAssignedToStar}; border-radius: 50%;
+                box-shadow: 0 0 4px rgba(0,0,0,0.6);"></div>`;
+            iconSize = [18, 18];
+        }
+
+        const icon = L.divIcon({ className: '', html: iconHtml, iconSize: iconSize });
         
-        // Генеруємо список опцій для випадаючого списку
+        // Малюємо лінію від Зірочки до Точки (Колір зони)
+        if (p.assignedStar) {
+            const starPoint = filteredPoints.find(s => s.id === p.assignedStar);
+            if (starPoint) {
+                L.polyline([
+                    [starPoint.lat, starPoint.lng],
+                    [p.lat, p.lng]
+                ], { color: p.color, weight: 2, dashArray: '5, 5', opacity: 0.8 }).addTo(layers.lines);
+            }
+        }
+        
+        // Малюємо лінію від Депо до Зірочки (Колір зони)
+        if (p.isStar) {
+            const depoDataPoint = depoData.find(d => d['Вузол'] === p.assigned);
+            if (depoDataPoint) {
+                L.polyline([
+                    [depoDataPoint['Широта'], depoDataPoint['Довгота']],
+                    [p.lat, p.lng]
+                ], { color: p.color, weight: 3, opacity: 0.9 }).addTo(layers.lines);
+            }
+        }
+
+        // Генеруємо список Депо
         let optionsHtml = '';
         if (workingDepo && workingDepo.length > 0) {
             optionsHtml = workingDepo.map(d => {
@@ -528,38 +698,63 @@ function drawMap(processedDepo = null) {
             }).join('');
         }
 
-        // Вміст Popup (з'являється по кліку)
+        // Генеруємо список доступних Зірочок у цій зоні
+        let starOptionsHtml = '<option value="none">Немає</option>';
+        if (!p.isStar) {
+            const depotStars = filteredPoints.filter(s => s.isStar && s.assigned === p.assigned);
+            depotStars.forEach(s => {
+                const selected = (s.id === p.assignedStar) ? 'selected' : '';
+                starOptionsHtml += `<option value="${s.id}" ${selected}>${s.id}</option>`;
+            });
+        }
+
+        const starInfo = p.isStar ? `<b style="color:${p.color};">Це Зірочка! (В підпорядкуванні: ${p.starChildren})</b><hr>` : '';
+        const assignedStarInfo = p.assignedStar ? `<span style="color:${p.color};">Підпорядковано зірочці: <b>${p.assignedStar}</b></span><hr>` : '';
+
+        // Вміст Popup відділення
         const popupContent = `
-            <div style="font-size:0.85rem; color:#f1f5f9;">
+            <div style="font-size:0.85rem; color:#f1f5f9; min-width: 220px;">
                 <b>${p.id}</b><br>
                 Депо: <b>${p.assigned || 'Немає'}</b><br>
+                ${starInfo}
+                ${assignedStarInfo}
                 ДВ: ${p.dv} | П: ${p.p} | В: ${p.v}
                 <hr style="margin:8px 0; border-color:#334155;">
                 
-                <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Перемістити до іншого депо:</div>
-                <select id="move-sel-${p.id}" style="width:100%; padding:6px; background:#0f172a; color:#fff; border:1px solid #334155; border-radius:4px; margin-bottom:8px;">
-                    ${optionsHtml}
-                </select>
-                <button onclick="movePoint('${p.id}')" style="width:100%; padding:6px; background:#1e293b; color:#fff; border:1px solid #4ade80; border-radius:4px; cursor:pointer;">
-                    ЗБЕРЕГТИ
-                </button>
+                ${!p.isStar ? `
+                <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Прив'язка до зірочки:</div>
+                <div style="display:flex; gap:5px; margin-bottom:12px;">
+                    <select id="move-star-sel-${p.id}" style="flex-grow:1; padding:6px; background:#0f172a; color:#fff; border:1px solid #334155; border-radius:4px;">
+                        ${starOptionsHtml}
+                    </select>
+                    <button onclick="movePointStar('${p.id}')" style="padding:6px 10px; background:#1e293b; color:#eab308; border:1px solid #eab308; border-radius:4px; cursor:pointer;">
+                        ОК
+                    </button>
+                </div>
+                ` : ''}
+
+                <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Змінити Депо:</div>
+                <div style="display:flex; gap:5px;">
+                    <select id="move-sel-${p.id}" style="flex-grow:1; padding:6px; background:#0f172a; color:#fff; border:1px solid #334155; border-radius:4px;">
+                        ${optionsHtml}
+                    </select>
+                    <button onclick="movePoint('${p.id}')" style="padding:6px 10px; background:#1e293b; color:#4ade80; border:1px solid #4ade80; border-radius:4px; cursor:pointer;">
+                        ОК
+                    </button>
+                </div>
             </div>
         `;
 
-        const m = L.marker([p.lat, p.lng], {icon});
+        const m = L.marker([p.lat, p.lng], {icon, zIndexOffset});
+        m.bindTooltip(`<b>${p.id}</b><br>Депо: ${p.assigned || 'Немає'}${p.assignedStar ? '<br>Зірочка: ' + p.assignedStar : ''}`);
         
-        // Tooltip для швидкого перегляду при наведенні
-        m.bindTooltip(`<b>${p.id}</b><br>Депо: ${p.assigned || 'Не розподілено'}`);
-        
-        // Popup для переміщення при кліку
         if (workingDepo && workingDepo.length > 0) {
-            m.bindPopup(popupContent);
+            m.bindPopup(popupContent, { minWidth: 220 });
         }
 
         m.addTo(layers.points);
     });
 }
-
 // --- ГРАФІКИ ДЛЯ ДЕПО ---
 let depotChartInstance = null;
 

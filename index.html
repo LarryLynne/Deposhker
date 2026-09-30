@@ -53,16 +53,23 @@
                 <label><input type="checkbox" id="chkV"> В</label>
             </div>
 
-            <label style="margin-top: 10px;">Пріоритетне Депо:</label>
-            <select id="priorityDepo">
-                <option value="auto">Авто (Північ -> Південь)</option>
-            </select>
-            <label style="margin-top: 10px;">Алгоритм:</label>
-            <select id="algoType">
-                <option value="sequential">Послідовний (З півночі на південь)</option>
-                <option value="bubbles">Бульбашки (Кроки по 1 км)</option>
-                <option value="global">Глобальна відстань (Оптимізований)</option>
-            </select>
+            <!-- Налаштування для зірочок -->
+            <label style="margin-top: 10px; color: var(--accent);">Налаштування Зірочок:</label>
+            <div class="setting-row">
+                <div class="setting-col">
+                    <label style="font-size: 0.65rem;">Мін. площа (кв.м):</label>
+                    <input type="number" id="starMinArea" value="150" min="0">
+                </div>
+                <div class="setting-col">
+                    <label style="font-size: 0.65rem;">Макс. зірочок/Депо:</label>
+                    <input type="number" id="starMaxCount" value="15" min="1">
+                </div>
+                <div class="setting-col">
+                    <label style="font-size: 0.65rem;">Відділень/Зірочку:</label>
+                    <input type="number" id="starMaxPoints" value="15" min="1">
+                </div>
+            </div>
+
             <button class="primary-btn" onclick="runDistribution()">Розподілити</button>
             <button onclick="exportToExcel()" style="margin-top: 10px; border-color: #4ade80; color: #4ade80;">
                 💾 Вивантажити в Excel
