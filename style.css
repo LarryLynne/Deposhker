@@ -175,3 +175,15 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
 }
 .stats-item span { color: var(--text-muted); display: block; font-size: 0.65rem; text-transform: uppercase; }
 .stats-item b { color: var(--text-main); font-size: 0.9rem; }
+
+/* --- СТИЛІ ВКЛАДОК ГРАФІКА --- */
+.chart-tabs {
+    display: flex; gap: 5px; margin-bottom: 15px;
+    background: var(--bg-body); padding: 5px; border-radius: 6px; border: 1px solid var(--border);
+}
+.tab-btn {
+    flex: 1; padding: 6px; margin: 0; background: transparent; border: none;
+    color: var(--text-muted); cursor: pointer; border-radius: 4px; font-weight: bold; transition: 0.2s;
+}
+.tab-btn:hover { color: var(--text-main); }
+.tab-btn.active { background: var(--bg-sidebar); color: var(--accent); box-shadow: 0 2px 5px rgba(0,0,0,0.5); border: 1px solid var(--border); }

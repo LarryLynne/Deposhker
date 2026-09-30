@@ -505,6 +505,60 @@ window.movePointStar = function(pointId) {
     }
 };
 
+// --- РУЧНЕ СТВОРЕННЯ ЗІРОЧКИ З АВТОДОБОРОМ ---
+window.makeManualStar = function(pointId) {
+    const pt = filteredPoints.find(p => p.id === pointId);
+    if (!pt || pt.isStar) return;
+
+    // Знімаємо з поточної зірочки, якщо була
+    if (pt.assignedStar) {
+        const oldStar = filteredPoints.find(s => s.id === pt.assignedStar);
+        if (oldStar) oldStar.starChildren--;
+        pt.assignedStar = null;
+    }
+
+    pt.isStar = true;
+    pt.starChildren = 0;
+
+    const depotId = pt.assigned;
+    if (!depotId) return drawMap(workingDepo); // Якщо немає депо, просто малюємо
+
+    const depotInfo = depoData.find(d => d['Вузол'] === depotId);
+    if (!depotInfo) return drawMap(workingDepo);
+
+    const depotPt = turf.point([parseFloat(depotInfo['Довгота']), parseFloat(depotInfo['Широта'])]);
+    const starGeo = turf.point([pt.lng, pt.lat]);
+    const distDepotToStar = turf.distance(depotPt, starGeo);
+    const bearingDepotToStar = turf.bearing(depotPt, starGeo);
+    
+    const maxPointsPerStar = parseInt(document.getElementById('starMaxPoints').value) || 15;
+
+    // Шукаємо вільні відділення у цьому ж депо
+    let regularPoints = filteredPoints.filter(p => p.assigned === depotId && !p.isStar && !p.assignedStar);
+
+    regularPoints.forEach(child => {
+        if (pt.starChildren >= maxPointsPerStar) return; // Ліміт
+
+        const childGeo = turf.point([child.lng, child.lat]);
+        const distDepotToChild = turf.distance(depotPt, childGeo);
+        
+        // Правило: точка далі від депо, ніж зірочка, і в тому ж напрямку
+        if (distDepotToChild > distDepotToStar) {
+            const bearingDepotToChild = turf.bearing(depotPt, childGeo);
+            let diff = Math.abs(bearingDepotToChild - bearingDepotToStar);
+            if (diff > 180) diff = 360 - diff;
+            
+            if (diff <= 35) {
+                child.assignedStar = pt.id;
+                pt.starChildren++;
+            }
+        }
+    });
+
+    map.closePopup();
+    drawMap(workingDepo);
+};
+
 // --- АЛГОРИТМ РОЗПОДІЛУ ЗІРОЧОК ---
 window.distributeStars = function(depotId) {
     // 1. Беремо налаштування з UI
@@ -738,14 +792,17 @@ function drawMap(processedDepo = null) {
         }
 
         // Дані Зірочки
+        // Дані про площу тепер тягнемо для ВСІХ відділень
+        const areaInfo = areaData.find(a => String(a['Вузол']) === String(p.id)) || {};
+        const ptArea = areaInfo['Площа'] || 0;
+        const ptRamps = areaInfo['Рампи'] || '0';
+
         let starStatsHtml = '';
         if (p.isStar) {
-            const areaInfo = areaData.find(a => String(a['Вузол']) === String(p.id)) || {};
             starStatsHtml = `
                 <div class="stats-grid">
                     <div class="stats-item"><span>Підлеглих</span><b>${p.starChildren}</b></div>
-                    <div class="stats-item"><span>Площа</span><b>${areaInfo['Площа'] || 0}</b></div>
-                    <div class="stats-item" style="grid-column: span 2;"><span>Рампи</span><b>${areaInfo['Рампи'] || '0'}</b></div>
+                    <div class="stats-item"><span>Площа Зірочки</span><b>${ptArea}</b></div>
                 </div>
                 <button onclick="openStarChart('${p.id}')" class="popup-btn btn-blue">📊 Графік Зірочки</button>
             `;
@@ -759,10 +816,14 @@ function drawMap(processedDepo = null) {
                 
                 ${starStatsHtml}
                 
-                <div style="font-size:0.75rem; color:var(--text-muted);">ДВ: ${p.dv} | П: ${p.p} | В: ${p.v}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">
+                    ДВ: ${p.dv} | П: ${p.p} | В: ${p.v}<br>
+                    Площа: <b>${ptArea}</b> | Рампи: <b>${ptRamps}</b>
+                </div>
                 <hr style="margin:8px 0; border-color:var(--border);">
                 
                 ${!p.isStar ? `
+                <button onclick="makeManualStar('${p.id}')" class="popup-btn btn-yellow" style="width:100%; margin-bottom:10px;">⭐ Зробити Зірочкою</button>
                 <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">Прив'язка до зірочки:</div>
                 <div class="popup-row">
                     <select id="move-star-sel-${p.id}" class="smart-input">${starOptionsHtml}</select>
@@ -780,15 +841,15 @@ function drawMap(processedDepo = null) {
 
         const m = L.marker([p.lat, p.lng], {icon, zIndexOffset: p.isStar ? 1000 : 0});
         
-        // Передаємо HTML у маркер, але не відкриваємо стандартним способом
         m.customPopupHtml = popupContent; 
         
-        // Імітуємо клік при наведенні для плагіна OMS (Веєр)
         m.on('mouseover', function() {
             window.isHoverClick = true; 
             m.fire('click'); 
             window.isHoverClick = false; 
         });
+
+        layers.points.addLayer(m);
 
         layers.points.addLayer(m); // Додаємо на шар карти
         oms.addMarker(m); // Додаємо до Spiderfier
@@ -796,52 +857,39 @@ function drawMap(processedDepo = null) {
 }
 
 
-// --- ГРАФІКИ ДЛЯ ДЕПО ---
+// --- ГРАФІКИ ДЛЯ ДЕПО ТА ЗІРОЧОК ---
 let depotChartInstance = null;
+let currentChartData = null; // Глобально зберігаємо дані поточного відкритого графіка
+let currentChartTab = 'all';
 
 window.openDepotChart = function(depotId) {
     if (!filteredPoints || filteredPoints.length === 0) return alert("Спочатку запустіть розподіл!");
 
-    document.getElementById('chartDepotTitle').innerText = `Навантаження: ${depotId} (24 години)`;
+    document.getElementById('chartDepotTitle').innerText = `Навантаження: ${depotId}`;
 
     const assignedBranchIds = filteredPoints.filter(p => p.assigned === depotId).map(p => p.id);
     const depoInfo = depoData.find(d => d['Вузол'] === depotId);
 
-    // 1. Збираємо базові ліміти для кожного типу
-    const caps = {
-        dv: parseFloat(depoInfo['ДВ']) || 0,
-        p: parseFloat(depoInfo['П']) || 0,
-        v: parseFloat(depoInfo['В']) || 0
-    };
-
-    // 2. Збираємо 24-годинну статистику для кожного типу окремо
-    const loads = {
-        dv: new Array(24).fill(0),
-        p: new Array(24).fill(0),
-        v: new Array(24).fill(0)
-    };
+    const caps = { dv: parseFloat(depoInfo['ДВ']) || 0, p: parseFloat(depoInfo['П']) || 0, v: parseFloat(depoInfo['В']) || 0 };
+    const loads = { dv: new Array(24).fill(0), p: new Array(24).fill(0), v: new Array(24).fill(0) };
     
     rawPointsData.forEach(r => {
-        if (assignedBranchIds.includes(r.id)) {
-            const h = r.hour;
-            if (h >= 0 && h <= 23) {
-                loads.dv[h] += r.dv || 0;
-                loads.p[h] += r.p || 0;
-                loads.v[h] += r.v || 0;
-            }
+        if (assignedBranchIds.includes(r.id) && r.hour >= 0 && r.hour <= 23) {
+            loads.dv[r.hour] += r.dv || 0;
+            loads.p[r.hour] += r.p || 0;
+            loads.v[r.hour] += r.v || 0;
         }
     });
 
-    renderChart(loads, caps);
+    currentChartData = { loads, caps };
+    switchChartTab('all'); // Завжди відкриваємо на загальній вкладці
     document.getElementById('chartModal').style.display = 'flex';
 };
 
 window.openStarChart = function(starId) {
     document.getElementById('chartDepotTitle').innerText = `Навантаження Зірочки: ${starId}`;
     
-    // Беремо саму зірочку і всіх її підлеглих
     const childrenIds = filteredPoints.filter(p => p.assignedStar === starId || p.id === starId).map(p => p.id);
-    
     const loads = { dv: new Array(24).fill(0), p: new Array(24).fill(0), v: new Array(24).fill(0) };
     
     rawPointsData.forEach(r => {
@@ -852,81 +900,72 @@ window.openStarChart = function(starId) {
         }
     });
 
-    // Передаємо нулі замість лімітів, щоб пунктири не малювались
-    renderChart(loads, {dv: 0, p: 0, v: 0}); 
+    currentChartData = { loads, caps: {dv: 0, p: 0, v: 0} }; // Зірочки не мають лімітів, передаємо нулі
+    switchChartTab('all');
     document.getElementById('chartModal').style.display = 'flex';
 };
 
+window.switchChartTab = function(tabId) {
+    currentChartTab = tabId;
+    
+    // Оновлюємо UI кнопок
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-tab') === tabId) btn.classList.add('active');
+    });
+
+    renderChart();
+};
 
 window.closeChartModal = function() {
     document.getElementById('chartModal').style.display = 'none';
 };
 
-function renderChart(loads, caps) {
+function renderChart() {
     const ctx = document.getElementById('depotChart').getContext('2d');
     if (depotChartInstance) depotChartInstance.destroy();
 
     const labels = Array.from({length: 24}, (_, i) => `${i}:00`);
+    const { loads, caps } = currentChartData;
+    let datasets = [];
+
+    // Функції для додавання конкретних кривих
+    const pushDV = () => {
+        datasets.push({ label: 'Фактично ДВ', data: loads.dv, borderColor: '#38bdf8', borderWidth: 3, tension: 0.3, fill: false });
+        if (caps.dv > 0) {
+            datasets.push({ label: 'Ліміт ДВ', data: new Array(24).fill(caps.dv), borderColor: '#38bdf8', borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false });
+            datasets.push({ label: '50% ДВ', data: new Array(24).fill(caps.dv / 2), borderColor: '#38bdf8', borderWidth: 1, borderDash: [2, 4], pointRadius: 0, fill: false });
+        }
+    };
+    
+    const pushP = () => {
+        datasets.push({ label: 'Фактично П', data: loads.p, borderColor: '#4ade80', borderWidth: 3, tension: 0.3, fill: false });
+        if (caps.p > 0) {
+            datasets.push({ label: 'Ліміт П', data: new Array(24).fill(caps.p), borderColor: '#4ade80', borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false });
+            datasets.push({ label: '50% П', data: new Array(24).fill(caps.p / 2), borderColor: '#4ade80', borderWidth: 1, borderDash: [2, 4], pointRadius: 0, fill: false });
+        }
+    };
+    
+    const pushV = () => {
+        datasets.push({ label: 'Фактично В', data: loads.v, borderColor: '#facc15', borderWidth: 3, tension: 0.3, fill: false });
+        if (caps.v > 0) {
+            datasets.push({ label: 'Ліміт В', data: new Array(24).fill(caps.v), borderColor: '#facc15', borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false });
+            datasets.push({ label: '50% В', data: new Array(24).fill(caps.v / 2), borderColor: '#facc15', borderWidth: 1, borderDash: [2, 4], pointRadius: 0, fill: false });
+        }
+    };
+
+    // Фільтруємо залежно від обраної вкладки
+    if (currentChartTab === 'all' || currentChartTab === 'dv') pushDV();
+    if (currentChartTab === 'all' || currentChartTab === 'p') pushP();
+    if (currentChartTab === 'all' || currentChartTab === 'v') pushV();
 
     depotChartInstance = new Chart(ctx, {
         type: 'line', 
-        data: {
-            labels: labels,
-            datasets: [
-                // --- ДВ (Синій) ---
-                {
-                    label: 'Фактично ДВ', data: loads.dv,
-                    borderColor: '#38bdf8', borderWidth: 3, tension: 0.3, fill: false
-                },
-                {
-                    label: 'Ліміт ДВ', data: new Array(24).fill(caps.dv),
-                    borderColor: '#38bdf8', borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false
-                },
-                // --- П (Зелений) ---
-                {
-                    label: 'Фактично П', data: loads.p,
-                    borderColor: '#4ade80', borderWidth: 3, tension: 0.3, fill: false
-                },
-                {
-                    label: 'Ліміт П', data: new Array(24).fill(caps.p),
-                    borderColor: '#4ade80', borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false
-                },
-                // --- В (Жовтий) ---
-                {
-                    label: 'Фактично В', data: loads.v,
-                    borderColor: '#facc15', borderWidth: 3, tension: 0.3, fill: false
-                },
-                {
-                    label: 'Ліміт В', data: new Array(24).fill(caps.v),
-                    borderColor: '#facc15', borderWidth: 2, borderDash: [5, 5], pointRadius: 0, fill: false
-                },
-                // Линии 50%
-                {
-                    label: '50% ДВ', data: new Array(24).fill(caps.dv / 2),
-                    borderColor: '#38bdf8', borderWidth: 1, borderDash: [2, 4], pointRadius: 0, fill: false
-                },
-                {
-                    label: '50% П', data: new Array(24).fill(caps.p / 2),
-                    borderColor: '#4ade80', borderWidth: 1, borderDash: [2, 4], pointRadius: 0, fill: false
-                },
-                {
-                    label: '50% В', data: new Array(24).fill(caps.v / 2),
-                    borderColor: '#facc15', borderWidth: 1, borderDash: [2, 4], pointRadius: 0, fill: false
-                }
-            ]
-        },
+        data: { labels: labels, datasets: datasets },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { 
-                mode: 'index', 
-                intersect: false // Показуватиме тултип для всіх ліній одразу
-            },
-            plugins: {
-                legend: { 
-                    labels: { color: '#f1f5f9', usePointStyle: true, boxWidth: 8 } 
-                }
-            },
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: '#f1f5f9', usePointStyle: true, boxWidth: 8 } } },
             scales: {
                 x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
                 y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, beginAtZero: true }
