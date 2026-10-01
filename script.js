@@ -157,12 +157,14 @@ async function fetchDepoData() {
 
 // 2. Читання Excel та відображення
 // 2. Читання Excel та відображення
+// 2. Читання Excel та відображення
+let currentWorkbook = null;
+
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
     document.getElementById('fileName').innerText = file.name;
     
-    // Перевірка, чи завантажені депо, оскільки вони потрібні для відновлення робочого стану
     if (depoData.length === 0) {
         alert("Увага: Спочатку завантажте дані Депо (Крок 1), інакше збережена сесія може завантажитись некоректно.");
     }
@@ -170,112 +172,153 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
     const reader = new FileReader();
     reader.onload = function(e) {
         const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, {type: 'array'});
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws);
+        currentWorkbook = XLSX.read(data, {type: 'array'});
         
-        // Визначаємо, чи це збережений файл результатів, чи сирі дані
-        const isSavedFile = json.length > 0 && json[0]['Призначене Депо'] !== undefined;
+        const select = document.getElementById('sheetSelect');
+        select.innerHTML = '';
+        let validSheetsCount = 0;
 
-        if (isSavedFile) {
-            // --- ВІДНОВЛЕННЯ ЗБЕРЕЖЕНОГО СТАНУ ---
+        // Перевіряємо всі аркуші у файлі
+        currentWorkbook.SheetNames.forEach(sheetName => {
+            const ws = currentWorkbook.Sheets[sheetName];
+            // Читаємо тільки перший рядок (заголовки)
+            const headers = XLSX.utils.sheet_to_json(ws, {header: 1})[0] || [];
             
-            // 1. Відновлюємо базові точки (фіктивний час потрібен, щоб не впав перерозподіл, якщо юзер захоче його запустити)
-            rawPointsData = json.map(r => ({
-                id: r['Відділення (Вузол)'],
-                lat: parseFloat(r['Широта']),
-                lng: parseFloat(r['Довгота']),
-                hour: 10, 
-                dv: parseFloat(r['ДВ (сума)']) || 0,
-                p: parseFloat(r['П (сума)']) || 0,
-                v: parseFloat(r['В (сума)']) || 0
-            }));
-            
-            // 2. Відновлюємо розподілені точки зі всіма метаданими
-            filteredPoints = json.map(r => ({
-                id: r['Відділення (Вузол)'],
-                lat: parseFloat(r['Широта']),
-                lng: parseFloat(r['Довгота']),
-                dv: parseFloat(r['ДВ (сума)']) || 0,
-                p: parseFloat(r['П (сума)']) || 0,
-                v: parseFloat(r['В (сума)']) || 0,
-                assigned: r['Призначене Депо'] === "Не розподілено" ? null : r['Призначене Депо'],
-                color: r['Колір'] || '#64748b',
-                isStar: r['Є Зірочкою'] === 'Так',
-                assignedStar: r["Прив'язана Зірочка"] || null,
-                starChildren: 0 
-            }));
-            
-            // Відновлюємо лічильники кількості підлеглих у зірочок
-            filteredPoints.forEach(p => {
-                if (p.assignedStar) {
-                    const star = filteredPoints.find(s => s.id === p.assignedStar);
-                    if (star) star.starChildren++;
-                }
-            });
+            // Аркуш підходить, якщо в ньому є координати і хоча б один ідентифікатор
+            const hasLat = headers.includes('Широта');
+            const hasLng = headers.includes('Довгота');
+            const hasId = headers.includes('Вузол') || headers.includes('ID') || headers.includes('Відділення (Вузол)');
 
-            // 3. Відновлюємо робочий масив Депо (workingDepo)
-            const hStart = parseInt(document.getElementById('hourStart').value) || 10;
-            const hEnd = parseInt(document.getElementById('hourEnd').value) || 12;
-            const hoursMultiplier = Math.max(1, (hEnd - hStart) + 1);
+            if (hasLat && hasLng && hasId) {
+                const opt = document.createElement('option');
+                opt.value = sheetName;
+                opt.innerText = sheetName;
+                select.appendChild(opt);
+                validSheetsCount++;
+            }
+        });
 
-            workingDepo = depoData.map(d => ({
-                ...d,
-                color: '#38bdf8', // Колір за замовчуванням
-                capDV: (parseFloat(d['ДВ']) || 0) * hoursMultiplier,
-                capP: (parseFloat(d['П']) || 0) * hoursMultiplier,
-                capV: (parseFloat(d['В']) || 0) * hoursMultiplier,
-                curDV: 0, curP: 0, curV: 0
-            }));
-            
-            // Наповнюємо депо вантажами та кольорами з відновлених відділень
-            filteredPoints.forEach(p => {
-                if (p.assigned) {
-                    const depo = workingDepo.find(d => d['Вузол'] === p.assigned);
-                    if (depo) {
-                        depo.curDV += p.dv;
-                        depo.curP += p.p;
-                        depo.curV += p.v;
-                        depo.color = p.color; // Депо наслідує колір своїх точок
-                    }
-                }
-            });
+        const selectionBlock = document.getElementById('sheetSelectionBlock');
 
-            document.getElementById('pointsStatus').innerHTML = `Відновлено сесію: ${filteredPoints.length} точок`;
-            document.getElementById('pointsStatus').className = 'status ok';
-            
-            // Одразу малюємо карту зі збереженими зонами
-            drawMap(workingDepo);
-
+        if (validSheetsCount === 0) {
+            alert("У файлі не знайдено аркушів із потрібним форматом (мають бути колонки Широта, Довгота та Вузол/ID).");
+            selectionBlock.style.display = 'none';
+        } else if (validSheetsCount === 1) {
+            // Якщо підходить тільки один аркуш — вантажимо його автоматично
+            selectionBlock.style.display = 'none';
+            processSelectedSheet(select.options[0].value);
         } else {
-            // --- ЗВИЧАЙНЕ ЗАВАНТАЖЕННЯ СИРИХ ДАНИХ (Стара логіка) ---
-            rawPointsData = json.map(r => ({
-                id: r['Вузол'] || r['ID'],
-                lat: parseFloat(r['Широта']),
-                lng: parseFloat(r['Довгота']),
-                hour: parseInt(r['Час'] || r['Година'] || 0),
-                dv: parseFloat(r['ДВ']) || 0,
-                p: parseFloat(r['П']) || 0,
-                v: parseFloat(r['В']) || 0
-            })).filter(r => !isNaN(r.lat) && !isNaN(r.lng));
-            
-            const uniquePoints = {};
-            rawPointsData.forEach(p => {
-                if (!uniquePoints[p.id]) {
-                    uniquePoints[p.id] = { id: p.id, lat: p.lat, lng: p.lng, dv: 0, p: 0, v: 0, assigned: null, color: '#64748b' };
-                }
-            });
-            filteredPoints = Object.values(uniquePoints);
-            
-            document.getElementById('pointsStatus').innerHTML = `Завантажено рядків: ${rawPointsData.length}`;
-            document.getElementById('pointsStatus').className = 'status ok';
-            
-            drawMap();
+            // Якщо підходять декілька — показуємо селект
+            selectionBlock.style.display = 'block';
+            document.getElementById('pointsStatus').innerHTML = `Знайдено аркушів: ${validSheetsCount}. Оберіть потрібний.`;
+            document.getElementById('pointsStatus').className = 'status';
         }
     };
     reader.readAsArrayBuffer(file);
 });
 
+// Функція обробки конкретного обраного аркуша
+window.processSelectedSheet = function(sheetNameFromArg = null) {
+    const sheetName = sheetNameFromArg || document.getElementById('sheetSelect').value;
+    if (!sheetName || !currentWorkbook) return;
+
+    // Ховаємо блок вибору після натискання ОК
+    document.getElementById('sheetSelectionBlock').style.display = 'none';
+
+    const ws = currentWorkbook.Sheets[sheetName];
+    const json = XLSX.utils.sheet_to_json(ws);
+    
+    const isSavedFile = json.length > 0 && json[0]['Призначене Депо'] !== undefined;
+
+    if (isSavedFile) {
+        // --- ВІДНОВЛЕННЯ ЗБЕРЕЖЕНОГО СТАНУ ---
+        rawPointsData = json.map(r => ({
+            id: String(r['Відділення (Вузол)']),
+            lat: parseFloat(r['Широта']),
+            lng: parseFloat(r['Довгота']),
+            hour: 10, 
+            dv: parseFloat(r['ДВ (сума)']) || 0,
+            p: parseFloat(r['П (сума)']) || 0,
+            v: parseFloat(r['В (сума)']) || 0
+        }));
+        
+        filteredPoints = json.map(r => ({
+            id: String(r['Відділення (Вузол)']),
+            lat: parseFloat(r['Широта']),
+            lng: parseFloat(r['Довгота']),
+            dv: parseFloat(r['ДВ (сума)']) || 0,
+            p: parseFloat(r['П (сума)']) || 0,
+            v: parseFloat(r['В (сума)']) || 0,
+            assigned: r['Призначене Депо'] === "Не розподілено" ? null : r['Призначене Депо'],
+            color: r['Колір'] || '#64748b',
+            isStar: r['Є Зірочкою'] === 'Так',
+            assignedStar: r["Прив'язана Зірочка"] || null,
+            starChildren: 0 
+        }));
+        
+        filteredPoints.forEach(p => {
+            if (p.assignedStar) {
+                const star = filteredPoints.find(s => s.id === p.assignedStar);
+                if (star) star.starChildren++;
+            }
+        });
+
+        const hStart = parseInt(document.getElementById('hourStart').value) || 10;
+        const hEnd = parseInt(document.getElementById('hourEnd').value) || 12;
+        const hoursMultiplier = Math.max(1, (hEnd - hStart) + 1);
+
+        workingDepo = depoData.map(d => ({
+            ...d,
+            color: '#38bdf8', 
+            capDV: (parseFloat(d['ДВ']) || 0) * hoursMultiplier,
+            capP: (parseFloat(d['П']) || 0) * hoursMultiplier,
+            capV: (parseFloat(d['В']) || 0) * hoursMultiplier,
+            curDV: 0, curP: 0, curV: 0
+        }));
+        
+        filteredPoints.forEach(p => {
+            if (p.assigned) {
+                const depo = workingDepo.find(d => d['Вузол'] === p.assigned);
+                if (depo) {
+                    depo.curDV += p.dv;
+                    depo.curP += p.p;
+                    depo.curV += p.v;
+                    depo.color = p.color; 
+                }
+            }
+        });
+
+        document.getElementById('pointsStatus').innerHTML = `Відновлено сесію: ${filteredPoints.length} точок`;
+        document.getElementById('pointsStatus').className = 'status ok';
+        
+        drawMap(workingDepo);
+
+    } else {
+        // --- ЗВИЧАЙНЕ ЗАВАНТАЖЕННЯ СИРИХ ДАНИХ ---
+        rawPointsData = json.map(r => ({
+            id: String(r['Вузол'] || r['ID']),
+            lat: parseFloat(r['Широта']),
+            lng: parseFloat(r['Довгота']),
+            hour: parseInt(r['Час'] || r['Година'] || 0),
+            dv: parseFloat(r['ДВ']) || 0,
+            p: parseFloat(r['П']) || 0,
+            v: parseFloat(r['В']) || 0
+        })).filter(r => !isNaN(r.lat) && !isNaN(r.lng));
+        
+        const uniquePoints = {};
+        rawPointsData.forEach(p => {
+            if (!uniquePoints[p.id]) {
+                uniquePoints[p.id] = { id: p.id, lat: p.lat, lng: p.lng, dv: 0, p: 0, v: 0, assigned: null, color: '#64748b' };
+            }
+        });
+        filteredPoints = Object.values(uniquePoints);
+        
+        document.getElementById('pointsStatus').innerHTML = `Завантажено рядків: ${rawPointsData.length}`;
+        document.getElementById('pointsStatus').className = 'status ok';
+        
+        drawMap();
+    }
+};
 // 3. Алгоритм розподілу
 // 3. Алгоритм розподілу
 function runDistribution() {
@@ -698,6 +741,7 @@ function drawMap(processedDepo = null) {
     }
 
     // 2. Депо (Зі статистикою та підтримкою веєра)
+    // 2. Депо (Зі статистикою та підтримкою веєра)
     depoData.forEach(d => {
         const isOff = d.isActive === false;
         const bgColor = isOff ? '#334155' : '#0f172a';
@@ -714,14 +758,16 @@ function drawMap(processedDepo = null) {
         const dPts = filteredPoints.filter(p => p.assigned === d['Вузол']);
         const starsCount = dPts.filter(p => p.isStar).length;
         const orphansCount = dPts.filter(p => !p.isStar && !p.assignedStar).length;
+        const depotRamps = d['Рампи'] || '0'; // <--- Читаємо рампи з Депо
 
         const popupHtml = `
             <div style="min-width: 200px;">
                 <b style="color: ${isOff ? '#94a3b8' : '#f1f5f9'}">${d['Вузол']}</b><br>
                 <div class="stats-grid">
                     <div class="stats-item"><span>Всього точок</span><b>${dPts.length}</b></div>
-                    <div class="stats-item"><span>Звіздочок</span><b style="color:#eab308;">${starsCount}</b></div>
-                    <div class="stats-item"><span>Незазвіздовано</span><b>${orphansCount}</b></div>
+                    <div class="stats-item"><span>Зірочок</span><b style="color:#eab308;">${starsCount}</b></div>
+                    <div class="stats-item"><span>Одинаків</span><b>${orphansCount}</b></div>
+                    <div class="stats-item"><span>Рампи</span><b style="color:#38bdf8;">${depotRamps}</b></div>
                 </div>
                 
                 ${isDist ? `<div class="popup-row" style="font-size:0.75rem;">Колір зони: <input type="color" value="${workDepoInfo.color}" onchange="changeDepoColor('${d['Вузол']}', this.value)" style="border:none; background:transparent; cursor:pointer;"></div>` : ''}
@@ -776,11 +822,14 @@ function drawMap(processedDepo = null) {
 
         // Обчислення відстаней до депо (Радіус 200 км)
         const ptGeo = turf.point([p.lng, p.lat]);
-        let depoDatalistHtml = '';
+        let depoSelectHtml = '';
         if (workingDepo) {
             workingDepo.forEach(d => {
                 const dist = turf.distance(ptGeo, turf.point([d['Довгота'], d['Широта']]));
-                if (dist <= 200) depoDatalistHtml += `<option value="${d['Вузол']}">Відстань: ${dist.toFixed(1)} км</option>`;
+                if (dist <= 200) {
+                    const isSelected = p.assigned === d['Вузол'] ? 'selected' : '';
+                    depoSelectHtml += `<option value="${d['Вузол']}" ${isSelected}>${d['Вузол']} (${dist.toFixed(1)} км)</option>`;
+                }
             });
         }
 
@@ -791,7 +840,6 @@ function drawMap(processedDepo = null) {
             });
         }
 
-        // Дані Зірочки
         // Дані про площу тепер тягнемо для ВСІХ відділень
         const areaInfo = areaData.find(a => String(a['Вузол']) === String(p.id)) || {};
         const ptArea = areaInfo['Площа'] || 0;
@@ -832,8 +880,10 @@ function drawMap(processedDepo = null) {
 
                 <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">Змінити Депо (< 200км):</div>
                 <div class="popup-row">
-                    <input list="dl-${p.id}" id="move-input-${p.id}" class="smart-input" value="${p.assigned || ''}" placeholder="Введіть Депо...">
-                    <datalist id="dl-${p.id}">${depoDatalistHtml}</datalist>
+                    <!-- Замінили datalist на звичайний select -->
+                    <select id="move-input-${p.id}" class="smart-input">
+                        ${depoSelectHtml}
+                    </select>
                     <button onclick="movePoint('${p.id}')" class="popup-btn btn-green">ОК</button>
                 </div>
             </div>

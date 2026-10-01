@@ -41,9 +41,18 @@
                 <div id="fileName">Обрати файл</div>
             </div>
             
+            <!-- Блок вибору аркуша (прихований за замовчуванням) -->
+            <div id="sheetSelectionBlock" class="sheet-selection">
+                <label style="font-size: 0.65rem;">Оберіть аркуш із даними:</label>
+                <div class="popup-row" style="margin-bottom: 0;">
+                    <select id="sheetSelect" class="smart-input"></select>
+                    <button onclick="processSelectedSheet()" class="popup-btn btn-green">ОК</button>
+                </div>
+            </div>
+
             <!-- Посилання на завантаження шаблону -->
             <div style="text-align: right;">
-                <a href="template.xlsx" download class="template-link">Завантажити приклад файлу</a>
+                <a href="template.xlsx" download class="template-link">📥 Завантажити приклад файлу</a>
             </div>
 
             <div id="pointsStatus" class="status">Очікування...</div>
