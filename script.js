@@ -253,8 +253,8 @@ window.processSelectedSheet = function(sheetNameFromArg = null) {
             v: parseFloat(r['В (сума)']) || 0,
             assigned: r['Призначене Депо'] === "Не розподілено" ? null : r['Призначене Депо'],
             color: r['Колір'] || '#64748b',
-            isStar: r['Є Звіздою'] === 'Так',
-            assignedStar: r["Прив'язана Звіздочка"] || null,
+            isStar: (r['Є Звіздою'] === 'Так' || r['Є Зірочкою'] === 'Так'),
+            assignedStar: r["Прив'язана Звіздочка"] || r["Прив'язана Зірочка"] || null,
             starChildren: 0 
         }));
         
