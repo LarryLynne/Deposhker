@@ -182,6 +182,7 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
 
         // Перевіряємо всі аркуші у файлі
         currentWorkbook.SheetNames.forEach(sheetName => {
+            if (sheetName === "Сирі_Дані") return;
             const ws = currentWorkbook.Sheets[sheetName];
             // Читаємо тільки перший рядок (заголовки)
             const headers = XLSX.utils.sheet_to_json(ws, {header: 1})[0] || [];
@@ -220,41 +221,75 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
 });
 
 // Функція обробки конкретного обраного аркуша
+// Функція обробки конкретного обраного аркуша
 window.processSelectedSheet = function(sheetNameFromArg = null) {
     const sheetName = sheetNameFromArg || document.getElementById('sheetSelect').value;
     if (!sheetName || !currentWorkbook) return;
 
-    // Ховаємо блок вибору після натискання ОК
     document.getElementById('sheetSelectionBlock').style.display = 'none';
 
     const ws = currentWorkbook.Sheets[sheetName];
     const json = XLSX.utils.sheet_to_json(ws);
     
-    const isSavedFile = json.length > 0 && json[0]['Призначене Депо'] !== undefined;
+    // Допоміжна функція для надійного пошуку колонок (ігнорує пробіли та зміну регістру)
+    const getVal = (row, keys) => {
+        for (let k in row) {
+            if (keys.includes(k.trim())) return row[k];
+        }
+        return undefined;
+    };
+    
+    const isSavedFile = json.length > 0 && getVal(json[0], ['Призначене Депо']) !== undefined;
 
     if (isSavedFile) {
         // --- ВІДНОВЛЕННЯ ЗБЕРЕЖЕНОГО СТАНУ ---
-        rawPointsData = json.map(r => ({
-            id: String(r['Відділення (Вузол)']),
-            lat: parseFloat(r['Широта']),
-            lng: parseFloat(r['Довгота']),
-            hour: 10, 
-            dv: parseFloat(r['ДВ (сума)']) || 0,
-            p: parseFloat(r['П (сума)']) || 0,
-            v: parseFloat(r['В (сума)']) || 0
-        }));
+        const hStart = parseInt(document.getElementById('hourStart').value) || 10;
+        const hEnd = parseInt(document.getElementById('hourEnd').value) || 12;
+        const hoursMultiplier = Math.max(1, (hEnd - hStart) + 1);
+
+        if (currentWorkbook.Sheets["Сирі_Дані"]) {
+            const rawJson = XLSX.utils.sheet_to_json(currentWorkbook.Sheets["Сирі_Дані"]);
+            rawPointsData = rawJson.map(r => ({
+                id: String(getVal(r, ['Відділення (Вузол)', 'Вузол', 'ID'])).trim(),
+                lat: parseFloat(getVal(r, ['Широта'])) || 0,
+                lng: parseFloat(getVal(r, ['Довгота'])) || 0,
+                hour: parseInt(getVal(r, ['Година', 'Час'])) || 0,
+                dv: parseFloat(getVal(r, ['ДВ'])) || 0,
+                p: parseFloat(getVal(r, ['П'])) || 0,
+                v: parseFloat(getVal(r, ['В'])) || 0
+            }));
+        } else {
+            // Фолбек для старих файлів (розмазуємо рівномірно)
+            rawPointsData = [];
+            json.forEach(r => {
+                const dvTotal = parseFloat(getVal(r, ['ДВ (сума)', 'ДВ'])) || 0;
+                const pTotal = parseFloat(getVal(r, ['П (сума)', 'П'])) || 0;
+                const vTotal = parseFloat(getVal(r, ['В (сума)', 'В'])) || 0;
+                for (let h = hStart; h <= hEnd; h++) {
+                    rawPointsData.push({
+                        id: String(getVal(r, ['Відділення (Вузол)', 'Вузол', 'ID'])).trim(),
+                        lat: parseFloat(getVal(r, ['Широта'])) || 0,
+                        lng: parseFloat(getVal(r, ['Довгота'])) || 0,
+                        hour: h, 
+                        dv: dvTotal / hoursMultiplier,
+                        p: pTotal / hoursMultiplier,
+                        v: vTotal / hoursMultiplier
+                    });
+                }
+            });
+        }
         
         filteredPoints = json.map(r => ({
-            id: String(r['Відділення (Вузол)']),
-            lat: parseFloat(r['Широта']),
-            lng: parseFloat(r['Довгота']),
-            dv: parseFloat(r['ДВ (сума)']) || 0,
-            p: parseFloat(r['П (сума)']) || 0,
-            v: parseFloat(r['В (сума)']) || 0,
-            assigned: r['Призначене Депо'] === "Не розподілено" ? null : r['Призначене Депо'],
-            color: r['Колір'] || '#64748b',
-            isStar: (r['Є Звіздою'] === 'Так' || r['Є Зірочкою'] === 'Так'),
-            assignedStar: r["Прив'язана Звіздочка"] || r["Прив'язана Зірочка"] || null,
+            id: String(getVal(r, ['Відділення (Вузол)', 'Вузол', 'ID'])).trim(),
+            lat: parseFloat(getVal(r, ['Широта'])) || 0,
+            lng: parseFloat(getVal(r, ['Довгота'])) || 0,
+            dv: parseFloat(getVal(r, ['ДВ (сума)', 'ДВ'])) || 0,
+            p: parseFloat(getVal(r, ['П (сума)', 'П'])) || 0,
+            v: parseFloat(getVal(r, ['В (сума)', 'В'])) || 0,
+            assigned: getVal(r, ['Призначене Депо']) === "Не розподілено" ? null : getVal(r, ['Призначене Депо']),
+            color: getVal(r, ['Колір']) || '#64748b',
+            isStar: (getVal(r, ['Є Звіздою']) === 'Так' || getVal(r, ['Є Зірочкою']) === 'Так'), 
+            assignedStar: getVal(r, ["Прив'язана Звіздочка"]) || getVal(r, ["Прив'язана Зірочка"]) || null,
             starChildren: 0 
         }));
         
@@ -264,10 +299,6 @@ window.processSelectedSheet = function(sheetNameFromArg = null) {
                 if (star) star.starChildren++;
             }
         });
-
-        const hStart = parseInt(document.getElementById('hourStart').value) || 10;
-        const hEnd = parseInt(document.getElementById('hourEnd').value) || 12;
-        const hoursMultiplier = Math.max(1, (hEnd - hStart) + 1);
 
         workingDepo = depoData.map(d => ({
             ...d,
@@ -280,7 +311,7 @@ window.processSelectedSheet = function(sheetNameFromArg = null) {
         
         filteredPoints.forEach(p => {
             if (p.assigned) {
-                const depo = workingDepo.find(d => d['Вузол'] === p.assigned);
+                const depo = workingDepo.find(d => String(d['Вузол']).trim() === String(p.assigned).trim());
                 if (depo) {
                     depo.curDV += p.dv;
                     depo.curP += p.p;
@@ -298,14 +329,14 @@ window.processSelectedSheet = function(sheetNameFromArg = null) {
     } else {
         // --- ЗВИЧАЙНЕ ЗАВАНТАЖЕННЯ СИРИХ ДАНИХ ---
         rawPointsData = json.map(r => ({
-            id: String(r['Вузол'] || r['ID']),
-            lat: parseFloat(r['Широта']),
-            lng: parseFloat(r['Довгота']),
-            hour: parseInt(r['Час'] || r['Година'] || 0),
-            dv: parseFloat(r['ДВ']) || 0,
-            p: parseFloat(r['П']) || 0,
-            v: parseFloat(r['В']) || 0
-        })).filter(r => !isNaN(r.lat) && !isNaN(r.lng));
+            id: String(getVal(r, ['Вузол', 'ID', 'Відділення (Вузол)'])).trim(),
+            lat: parseFloat(getVal(r, ['Широта'])) || 0,
+            lng: parseFloat(getVal(r, ['Довгота'])) || 0,
+            hour: parseInt(getVal(r, ['Час', 'Година'])) || 0,
+            dv: parseFloat(getVal(r, ['ДВ'])) || 0,
+            p: parseFloat(getVal(r, ['П'])) || 0,
+            v: parseFloat(getVal(r, ['В'])) || 0
+        })).filter(r => r.lat !== 0 && r.lng !== 0);
         
         const uniquePoints = {};
         rawPointsData.forEach(p => {
@@ -456,12 +487,13 @@ function runDistribution() {
 
 // --- ВИВАНТАЖЕННЯ В EXCEL ---
 // --- ВИВАНТАЖЕННЯ В EXCEL ---
+// --- ВИВАНТАЖЕННЯ В EXCEL ---
 window.exportToExcel = function() {
     if (!filteredPoints || filteredPoints.length === 0) {
         return alert("Немає даних для вивантаження! Спочатку завантажте файл.");
     }
 
-    // Формуємо масив з розширеними метаданими
+    // 1. Формуємо масив з розширеними метаданими (Результат розподілу)
     const exportData = filteredPoints.map(p => ({
         "Відділення (Вузол)": p.id,
         "Широта": p.lat,
@@ -471,17 +503,30 @@ window.exportToExcel = function() {
         "В (сума)": p.v,
         "Призначене Депо": p.assigned || "Не розподілено",
         "Колір": p.color || "",
-        "Є Звіздою": p.isStar ? "Так" : "Ні",
-        "Прив'язана Звіздочка": p.assignedStar || ""
+        "Є Зірочкою": p.isStar ? "Так" : "Ні",
+        "Прив'язана Зірочка": p.assignedStar || ""
     }));
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    // 2. Формуємо масив сирих даних (для коректного відновлення графіків)
+    const rawDataExport = rawPointsData.map(r => ({
+        "Відділення (Вузол)": r.id,
+        "Широта": r.lat,
+        "Довгота": r.lng,
+        "Година": r.hour,
+        "ДВ": r.dv,
+        "П": r.p,
+        "В": r.v
+    }));
+
+    const wsResult = XLSX.utils.json_to_sheet(exportData);
+    const wsRaw = XLSX.utils.json_to_sheet(rawDataExport);
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Розподіл_Депо");
+    XLSX.utils.book_append_sheet(wb, wsResult, "Розподіл_Депо");
+    XLSX.utils.book_append_sheet(wb, wsRaw, "Сирі_Дані");
 
     XLSX.writeFile(wb, "Депошкер_Результат.xlsx");
 };
-
 // --- РУЧНЕ ПЕРЕМІЩЕННЯ ---
 // --- РУЧНЕ ПЕРЕМІЩЕННЯ МІЖ ДЕПО ---
 window.movePoint = function(pointId) {
@@ -994,40 +1039,47 @@ window.openDepotChart = function(depotId) {
 
     document.getElementById('chartDepotTitle').innerText = `Навантаження: ${depotId}`;
 
-    const assignedBranchIds = filteredPoints.filter(p => p.assigned === depotId).map(p => p.id);
-    const depoInfo = depoData.find(d => d['Вузол'] === depotId);
+    const assignedBranchIds = filteredPoints.filter(p => p.assigned === depotId).map(p => String(p.id).trim());
+    const depoInfo = depoData.find(d => String(d['Вузол']).trim() === String(depotId).trim());
+    if (!depoInfo) return alert("Дані депо не знайдені. Спочатку оновіть Депо (Крок 1).");
 
     const caps = { dv: parseFloat(depoInfo['ДВ']) || 0, p: parseFloat(depoInfo['П']) || 0, v: parseFloat(depoInfo['В']) || 0 };
     const loads = { dv: new Array(24).fill(0), p: new Array(24).fill(0), v: new Array(24).fill(0) };
     
     rawPointsData.forEach(r => {
-        if (assignedBranchIds.includes(r.id) && r.hour >= 0 && r.hour <= 23) {
-            loads.dv[r.hour] += r.dv || 0;
-            loads.p[r.hour] += r.p || 0;
-            loads.v[r.hour] += r.v || 0;
+        const rId = String(r.id).trim();
+        const hr = parseInt(r.hour) || 0;
+        
+        if (assignedBranchIds.includes(rId) && hr >= 0 && hr <= 23) {
+            loads.dv[hr] += parseFloat(r.dv) || 0;
+            loads.p[hr] += parseFloat(r.p) || 0;
+            loads.v[hr] += parseFloat(r.v) || 0;
         }
     });
 
     currentChartData = { loads, caps };
-    switchChartTab('all'); // Завжди відкриваємо на загальній вкладці
+    switchChartTab('all'); 
     document.getElementById('chartModal').style.display = 'flex';
 };
 
 window.openStarChart = function(starId) {
     document.getElementById('chartDepotTitle').innerText = `Навантаження Звіздочки: ${starId}`;
     
-    const childrenIds = filteredPoints.filter(p => p.assignedStar === starId || p.id === starId).map(p => p.id);
+    const childrenIds = filteredPoints.filter(p => p.assignedStar === starId || p.id === starId).map(p => String(p.id).trim());
     const loads = { dv: new Array(24).fill(0), p: new Array(24).fill(0), v: new Array(24).fill(0) };
     
     rawPointsData.forEach(r => {
-        if (childrenIds.includes(r.id) && r.hour >= 0 && r.hour <= 23) {
-            loads.dv[r.hour] += r.dv || 0;
-            loads.p[r.hour] += r.p || 0;
-            loads.v[r.hour] += r.v || 0;
+        const rId = String(r.id).trim();
+        const hr = parseInt(r.hour) || 0;
+        
+        if (childrenIds.includes(rId) && hr >= 0 && hr <= 23) {
+            loads.dv[hr] += parseFloat(r.dv) || 0;
+            loads.p[hr] += parseFloat(r.p) || 0;
+            loads.v[hr] += parseFloat(r.v) || 0;
         }
     });
 
-    currentChartData = { loads, caps: {dv: 0, p: 0, v: 0} }; // Зірочки не мають лімітів, передаємо нулі
+    currentChartData = { loads, caps: {dv: 0, p: 0, v: 0} }; 
     switchChartTab('all');
     document.getElementById('chartModal').style.display = 'flex';
 };
