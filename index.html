@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Депошкер</title>
+    <title>Звіздар</title>
     
     <!-- 1. Базові стилі та шрифти -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -25,7 +25,7 @@
 </head>
 <body>
     <div id="sidebar">
-        <h2>Депошкер</h2>
+        <h2>Звіздар</h2>
         
         <div class="card">
             <label>1. Дані Депо (GAS)</label>
@@ -79,18 +79,18 @@
             </div>
 
             <!-- Налаштування для зірочок -->
-            <label style="margin-top: 10px; color: var(--accent);">Налаштування Зірочок:</label>
+            <label style="margin-top: 10px; color: var(--accent);">Налаштування звіздочок:</label>
             <div class="setting-row">
                 <div class="setting-col">
                     <label style="font-size: 0.65rem;">Мін. площа (кв.м):</label>
                     <input type="number" id="starMinArea" value="150" min="0">
                 </div>
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Макс. зірочок/Депо:</label>
+                    <label style="font-size: 0.65rem;">Макс. звіздочок/Депо:</label>
                     <input type="number" id="starMaxCount" value="15" min="1">
                 </div>
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Відділень/Зірочку:</label>
+                    <label style="font-size: 0.65rem;">Відділень/Звіздочку:</label>
                     <input type="number" id="starMaxPoints" value="15" min="1">
                 </div>
             </div>
@@ -104,6 +104,12 @@
     
     <div id="rightColumn">
         <div id="map"></div>
+        <div id="mapFilterContainer" class="map-filter-container">
+        <input type="text" id="mapFilterInput" class="smart-input" readonly placeholder="Усі депо (натисніть для вибору)" onclick="toggleFilterMenu()">
+        <div id="mapFilterMenu" class="map-filter-menu" style="display: none;">
+            <!-- Чекбокси згенеруються тут -->
+        </div>
+    </div>
         <img src="logo3.png" alt="Logo" class="map-floating-logo">
     </div>
 

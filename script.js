@@ -9,6 +9,8 @@ let filteredPoints = [];
 let workingDepo = [];
 let areaData = [];
 
+window.activeDepotFilters = new Set(); // Порожній = показувати всі
+
 // Оновлена, більш контрастна палітра (без схожих відтінків підряд)
 const distinctColors = [
     '#FF0000', // Червоний
@@ -251,8 +253,8 @@ window.processSelectedSheet = function(sheetNameFromArg = null) {
             v: parseFloat(r['В (сума)']) || 0,
             assigned: r['Призначене Депо'] === "Не розподілено" ? null : r['Призначене Депо'],
             color: r['Колір'] || '#64748b',
-            isStar: r['Є Зірочкою'] === 'Так',
-            assignedStar: r["Прив'язана Зірочка"] || null,
+            isStar: r['Є Звіздою'] === 'Так',
+            assignedStar: r["Прив'язана Звіздочка"] || null,
             starChildren: 0 
         }));
         
@@ -340,6 +342,14 @@ function runDistribution() {
     if (hStart > hEnd) return alert("Невірний діапазон часу!");
 
     const hoursMultiplier = (hEnd - hStart) + 1;
+    
+    // Зберігаємо статуси виключення перед агрегацією
+    const excludedPointsMap = {};
+    if (filteredPoints.length > 0) {
+        filteredPoints.forEach(p => {
+            if (p.isExcluded) excludedPointsMap[p.id] = true;
+        });
+    }
 
     // Агрегація точок (ЗБЕРІГАЄМО НУЛЬОВІ ВІДДІЛЕННЯ)
     const aggregated = {};
@@ -359,6 +369,10 @@ function runDistribution() {
     });
     filteredPoints = Object.values(aggregated);
 
+    // Відновлюємо статуси виключення
+    filteredPoints.forEach(p => {
+        if (excludedPointsMap[p.id]) p.isExcluded = true;
+    });
     // Підготовка Депо
     workingDepo = depoData
         .filter(d => d.isActive !== false)
@@ -388,7 +402,7 @@ function runDistribution() {
 
     for (let pair of pairs) {
         let { pt, depo } = pair;
-        if (pt.assigned) continue; 
+        if (pt.assigned || pt.isExcluded) continue; 
 
         let hitLimit = false;
         if (useDV && (depo.curDV + pt.dv > depo.capDV)) hitLimit = true;
@@ -405,7 +419,7 @@ function runDistribution() {
     }
 
     // --- ФАЗА 2: РОЗПОДІЛ ЗАЛИШКІВ ---
-    let remainders = filteredPoints.filter(p => !p.assigned);
+    let remainders = filteredPoints.filter(p => !p.assigned && !p.isExcluded);
     remainders.forEach(pt => {
         const ptGeo = turf.point([pt.lng, pt.lat]);
         let bestDepo = null;
@@ -457,8 +471,8 @@ window.exportToExcel = function() {
         "В (сума)": p.v,
         "Призначене Депо": p.assigned || "Не розподілено",
         "Колір": p.color || "",
-        "Є Зірочкою": p.isStar ? "Так" : "Ні",
-        "Прив'язана Зірочка": p.assignedStar || ""
+        "Є Звіздою": p.isStar ? "Так" : "Ні",
+        "Прив'язана Звіздочка": p.assignedStar || ""
     }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
@@ -513,6 +527,38 @@ window.movePoint = function(pointId) {
         map.closePopup();
         drawMap(workingDepo); // Перемальовуємо карту
     }
+};
+
+// --- ВИКЛЮЧЕННЯ ТОЧКИ З РОЗРАХУНКУ ---
+window.toggleExcludePoint = function(pointId) {
+    const pt = filteredPoints.find(p => p.id === pointId);
+    if (!pt) return;
+    
+    pt.isExcluded = !pt.isExcluded;
+
+    if (pt.isExcluded) {
+        // Знімаємо вантаж з депо та відв'язуємо
+        if (pt.assigned) {
+            const depo = workingDepo.find(d => d['Вузол'] === pt.assigned);
+            if (depo) {
+                depo.curDV -= pt.dv; depo.curP -= pt.p; depo.curV -= pt.v;
+            }
+            pt.assigned = null;
+        }
+        // Відв'язуємо від зірочок
+        if (pt.isStar) {
+            pt.isStar = false; pt.starChildren = 0;
+            filteredPoints.forEach(child => { if (child.assignedStar === pt.id) child.assignedStar = null; });
+        }
+        if (pt.assignedStar) {
+            const oldStar = filteredPoints.find(s => s.id === pt.assignedStar);
+            if (oldStar) oldStar.starChildren--;
+            pt.assignedStar = null;
+        }
+    }
+    
+    map.closePopup();
+    drawMap(workingDepo);
 };
 
 // --- РУЧНЕ КЕРУВАННЯ ЗІРОЧКАМИ ---
@@ -600,6 +646,26 @@ window.makeManualStar = function(pointId) {
 
     map.closePopup();
     drawMap(workingDepo);
+};
+
+// --- РУЧНЕ РОЗЗВІЗДОВУВАННЯ ---
+window.unmakeManualStar = function(pointId) {
+    const pt = filteredPoints.find(p => p.id === pointId);
+    if (!pt || !pt.isStar) return;
+
+    // Знімаємо статус зірочки
+    pt.isStar = false;
+    pt.starChildren = 0;
+
+    // Відв'язуємо всі точки (дітей), що були прив'язані до цієї зірочки
+    filteredPoints.forEach(child => {
+        if (child.assignedStar === pt.id) {
+            child.assignedStar = null;
+        }
+    });
+
+    map.closePopup();
+    drawMap(workingDepo); // Перемальовуємо карту, щоб прибрати лінії
 };
 
 // --- АЛГОРИТМ РОЗПОДІЛУ ЗІРОЧОК ---
@@ -726,6 +792,7 @@ function drawMap(processedDepo = null) {
     // 1. Полігони
     if (processedDepo) {
         processedDepo.forEach(depo => {
+            if (window.activeDepotFilters.size > 0 && !window.activeDepotFilters.has(depo['Вузол'])) return;
             const depoPoints = filteredPoints.filter(p => p.assigned === depo['Вузол']);
             if (depoPoints.length >= 3) {
                 const pts = depoPoints.map(p => turf.point([p.lng, p.lat]));
@@ -743,6 +810,7 @@ function drawMap(processedDepo = null) {
     // 2. Депо (Зі статистикою та підтримкою веєра)
     // 2. Депо (Зі статистикою та підтримкою веєра)
     depoData.forEach(d => {
+        if (window.activeDepotFilters.size > 0 && !window.activeDepotFilters.has(d['Вузол'])) return;
         const isOff = d.isActive === false;
         const bgColor = isOff ? '#334155' : '#0f172a';
         const borderColor = isOff ? '#64748b' : '#38bdf8';
@@ -765,14 +833,14 @@ function drawMap(processedDepo = null) {
                 <b style="color: ${isOff ? '#94a3b8' : '#f1f5f9'}">${d['Вузол']}</b><br>
                 <div class="stats-grid">
                     <div class="stats-item"><span>Всього точок</span><b>${dPts.length}</b></div>
-                    <div class="stats-item"><span>Зірочок</span><b style="color:#eab308;">${starsCount}</b></div>
-                    <div class="stats-item"><span>Одинаків</span><b>${orphansCount}</b></div>
+                    <div class="stats-item"><span>Звіздочок</span><b style="color:#eab308;">${starsCount}</b></div>
+                    <div class="stats-item"><span>Без звізди</span><b>${orphansCount}</b></div>
                     <div class="stats-item"><span>Рампи</span><b style="color:#38bdf8;">${depotRamps}</b></div>
                 </div>
                 
                 ${isDist ? `<div class="popup-row" style="font-size:0.75rem;">Колір зони: <input type="color" value="${workDepoInfo.color}" onchange="changeDepoColor('${d['Вузол']}', this.value)" style="border:none; background:transparent; cursor:pointer;"></div>` : ''}
 
-                <button onclick="distributeStars('${d['Вузол']}')" class="popup-btn btn-blue" style="color:#000; background:#eab308; border-color:#eab308;" ${isOff || !isDist ? 'disabled' : ''}>🌟 Шукати Зірочки</button>
+                <button onclick="distributeStars('${d['Вузол']}')" class="popup-btn btn-blue" style="color:#000; background:#eab308; border-color:#eab308;" ${isOff || !isDist ? 'disabled' : ''}>🌟 Шукати Звіздочки</button>
                 <div class="popup-row">
                     <button onclick="toggleDepo('${d['Вузол']}')" class="popup-btn btn-blue" style="flex:1; background:${isOff ? '#4ade80' : '#ef4444'}; color:${isOff ? '#000' : '#fff'};">${isOff ? 'ВКЛ' : 'ВИКЛ'}</button>
                     <button onclick="openDepotChart('${d['Вузол']}')" class="popup-btn btn-blue" style="flex:1;" ${isOff ? 'disabled' : ''}>📊 Графік</button>
@@ -796,11 +864,15 @@ function drawMap(processedDepo = null) {
 
     // 3. Точки відділень та Зірочки
     filteredPoints.forEach(p => {
+        if (window.activeDepotFilters.size > 0 && p.assigned && !window.activeDepotFilters.has(p.assigned)) return;
         const isZero = (p.dv + p.p + p.v) === 0;
         const col = isZero ? '#334155' : (p.color || '#64748b'); // Сірий, якщо нульовий
         
         let iconHtml, iconSize;
-        if (p.isStar) {
+        if (p.isExcluded) {
+            iconHtml = `<div style="background:#000; width:16px; height:16px; border: 2px solid #ef4444; border-radius: 50%; display:flex; align-items:center; justify-content:center; color:#ef4444; font-size:12px; font-weight:bold; box-shadow: 0 0 8px #ef4444;">X</div>`;
+            iconSize = [20, 20];
+        } else if (p.isStar) {
             iconHtml = `<div style="background:${p.color}; width:20px; height:20px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 10px ${p.color}; display:flex; align-items:center; justify-content:center; font-size:12px; text-shadow: 1px 1px 2px #000;">⭐</div>`;
             iconSize = [24, 24];
         } else {
@@ -850,9 +922,9 @@ function drawMap(processedDepo = null) {
             starStatsHtml = `
                 <div class="stats-grid">
                     <div class="stats-item"><span>Підлеглих</span><b>${p.starChildren}</b></div>
-                    <div class="stats-item"><span>Площа Зірочки</span><b>${ptArea}</b></div>
+                    <div class="stats-item"><span>Площа Звіздочки</span><b>${ptArea}</b></div>
                 </div>
-                <button onclick="openStarChart('${p.id}')" class="popup-btn btn-blue">📊 Графік Зірочки</button>
+                <button onclick="openStarChart('${p.id}')" class="popup-btn btn-blue">📊 Графік Звіздочки</button>
             `;
         }
 
@@ -871,21 +943,26 @@ function drawMap(processedDepo = null) {
                 <hr style="margin:8px 0; border-color:var(--border);">
                 
                 ${!p.isStar ? `
-                <button onclick="makeManualStar('${p.id}')" class="popup-btn btn-yellow" style="width:100%; margin-bottom:10px;">⭐ Зробити Зірочкою</button>
-                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">Прив'язка до зірочки:</div>
+                <button onclick="makeManualStar('${p.id}')" class="popup-btn btn-yellow" style="width:100%; margin-bottom:10px;">⭐ Зазвіздувати</button>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">Прив'язка до звіздочки:</div>
                 <div class="popup-row">
                     <select id="move-star-sel-${p.id}" class="smart-input">${starOptionsHtml}</select>
                     <button onclick="movePointStar('${p.id}')" class="popup-btn btn-yellow">ОК</button>
-                </div>` : ''}
+                </div>` : `
+                <button onclick="unmakeManualStar('${p.id}')" class="popup-btn btn-red" style="width:100%; margin-bottom:10px;">❌ Роззвіздувати</button>
+                `}
 
                 <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:4px;">Змінити Депо (< 200км):</div>
                 <div class="popup-row">
-                    <!-- Замінили datalist на звичайний select -->
                     <select id="move-input-${p.id}" class="smart-input">
                         ${depoSelectHtml}
                     </select>
                     <button onclick="movePoint('${p.id}')" class="popup-btn btn-green">ОК</button>
                 </div>
+                
+                <button onclick="toggleExcludePoint('${p.id}')" class="popup-btn ${p.isExcluded ? 'btn-green' : 'btn-red'}" style="width:100%; margin-top:5px;">
+                    ${p.isExcluded ? '✅ Повернути до розрахунку' : '⛔ Виключити з розрахунку'}
+                </button>
             </div>
         `;
 
@@ -937,7 +1014,7 @@ window.openDepotChart = function(depotId) {
 };
 
 window.openStarChart = function(starId) {
-    document.getElementById('chartDepotTitle').innerText = `Навантаження Зірочки: ${starId}`;
+    document.getElementById('chartDepotTitle').innerText = `Навантаження Звіздочки: ${starId}`;
     
     const childrenIds = filteredPoints.filter(p => p.assignedStar === starId || p.id === starId).map(p => p.id);
     const loads = { dv: new Array(24).fill(0), p: new Array(24).fill(0), v: new Array(24).fill(0) };
@@ -1093,3 +1170,105 @@ window.applyMassMove = function() {
     closeMassMoveModal();
     drawMap(workingDepo);
 };
+
+// --- ФІЛЬТР ДЕПО НА КАРТІ ---
+
+
+window.toggleFilterMenu = function() {
+    const menu = document.getElementById('mapFilterMenu');
+    if (menu.style.display === 'none' || menu.style.display === '') {
+        buildFilterMenu();
+        menu.style.display = 'flex';
+    } else {
+        menu.style.display = 'none';
+    }
+};
+
+window.buildFilterMenu = function() {
+    const menu = document.getElementById('mapFilterMenu');
+    // Знаходимо тільки ті депо, у яких є відділення
+    const activeDepots = [...new Set(filteredPoints.filter(p => p.assigned).map(p => p.assigned))].sort();
+    
+    if (activeDepots.length === 0) {
+        menu.innerHTML = '<div style="color:var(--text-muted); font-size:0.8rem;">Немає призначених депо</div>';
+        return;
+    }
+
+    // Перевіряємо, чи всі депо наразі вибрані
+    const isAllChecked = window.activeDepotFilters.size === 0 || window.activeDepotFilters.size === activeDepots.length;
+
+    // Додаємо чекбокс "Обрати всі" з невеликим візуальним відділенням
+    let html = `<label style="font-weight: bold; border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px;">
+                    <input type="checkbox" id="selectAllDepots" onchange="toggleAllDepots(this)" ${isAllChecked ? 'checked' : ''}> 
+                    Обрати всі
+                </label>`;
+    
+    activeDepots.forEach(depoId => {
+        // Якщо фільтр порожній (size === 0), це означає, що показуються всі, тому галочки стоять
+        const isChecked = window.activeDepotFilters.size === 0 || window.activeDepotFilters.has(depoId);
+        
+        // Додаємо клас "depot-filter-cb", щоб легко масово ними керувати
+        html += `<label><input type="checkbox" class="depot-filter-cb" value="${depoId}" onchange="updateDepotFilter()" ${isChecked ? 'checked' : ''}> ${depoId}</label>`;
+    });
+    
+    menu.innerHTML = html;
+};
+
+// Нова функція для керування масовим виділенням
+window.toggleAllDepots = function(selectAllCb) {
+    const checkboxes = document.querySelectorAll('.depot-filter-cb');
+    // Ставимо або знімаємо всі галочки залежно від стану "Обрати всі"
+    checkboxes.forEach(cb => {
+        cb.checked = selectAllCb.checked;
+    });
+    // Запускаємо оновлення карти
+    updateDepotFilter();
+};
+
+window.updateDepotFilter = function() {
+    const checkboxes = document.querySelectorAll('.depot-filter-cb');
+    const selectAllCb = document.getElementById('selectAllDepots');
+    
+    window.activeDepotFilters.clear();
+    let selectedNames = [];
+    let allChecked = true;
+
+    checkboxes.forEach(cb => {
+        if (cb.checked) {
+            window.activeDepotFilters.add(cb.value);
+            selectedNames.push(cb.value);
+        } else {
+            allChecked = false;
+        }
+    });
+
+    // Синхронізуємо стан головного чекбокса (якщо користувач вручну проклікав усі)
+    if (selectAllCb) {
+        selectAllCb.checked = allChecked;
+    }
+
+    const input = document.getElementById('mapFilterInput');
+    
+    if (allChecked) {
+        // Якщо вибрані всі, очищаємо фільтр (карта покаже все без обмежень)
+        window.activeDepotFilters.clear(); 
+        input.value = ''; 
+    } else if (selectedNames.length === 0) {
+        // Якщо користувач зняв усі галочки - додаємо фейковий ID, щоб на карті не відображалося нічого
+        window.activeDepotFilters.add('__NONE__');
+        input.value = 'Нічого не обрано';
+    } else {
+        // Якщо вибрана тільки частина депо
+        input.value = selectedNames.join(', ');
+    }
+
+    drawMap(workingDepo.length > 0 ? workingDepo : null);
+};
+
+// Закриваємо меню кліком поза ним
+document.addEventListener('click', function(e) {
+    const container = document.getElementById('mapFilterContainer');
+    if (container && !container.contains(e.target)) {
+        document.getElementById('mapFilterMenu').style.display = 'none';
+    }
+});
