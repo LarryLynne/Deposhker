@@ -243,3 +243,69 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
     font-size: 0.8rem; cursor: pointer; text-transform: none; margin: 0;
 }
 .map-filter-menu input[type="checkbox"] { margin: 0; }
+
+/* Контейнер для правого верхнего угла */
+.top-right-controls {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    z-index: 1000;
+    display: flex;
+    gap: 10px;
+}
+
+/* Корректировка существующего фильтра для работы внутри flex-контейнера */
+.map-filter-container {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    width: 220px;
+}
+
+/* Стили для нового поиска */
+.map-search-container {
+    position: relative;
+    width: 280px;
+}
+
+.map-search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 250px;
+    overflow-y: auto;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+}
+
+.search-result-item {
+    padding: 8px 10px;
+    cursor: pointer;
+    color: var(--text-main);
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.search-result-item:hover {
+    background: var(--btn-hover);
+    color: var(--accent);
+}
+
+/* Анимация ореола (пульсация) */
+.highlight-halo {
+    border-radius: 50%;
+    background: rgba(56, 189, 248, 0.4); 
+    box-shadow: 0 0 15px 5px rgba(56, 189, 248, 0.8);
+    animation: pulse-halo 1s infinite alternate;
+}
+
+@keyframes pulse-halo {
+    0% { transform: scale(0.7); opacity: 0.5; }
+    100% { transform: scale(1.6); opacity: 1; }
+}

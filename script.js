@@ -1324,3 +1324,102 @@ document.addEventListener('click', function(e) {
         document.getElementById('mapFilterMenu').style.display = 'none';
     }
 });
+
+
+// --- ПОШУК ВІДДІЛЕННЯ (З ОРЕОЛОМ) ---
+let highlightLayer = null;
+
+window.handleSearchInput = function(query) {
+    const resultsContainer = document.getElementById('pointSearchResults');
+    query = query.trim().toLowerCase();
+
+    // Вимагаємо мінімум 3 символи для початку пошуку
+    if (query.length < 3) {
+        resultsContainer.style.display = 'none';
+        return;
+    }
+
+    // Шукаємо відділення по їхньому ID (Вузлу)
+    const matches = filteredPoints.filter(p => String(p.id).toLowerCase().includes(query));
+
+    if (matches.length === 0) {
+        resultsContainer.innerHTML = '<div class="search-result-item" style="color:var(--text-muted); cursor:default;">Нічого не знайдено</div>';
+        resultsContainer.style.display = 'flex';
+    } else if (matches.length === 1) {
+        // Якщо знайшли рівно одне співпадіння - ховаємо список і фокусуємось
+        resultsContainer.style.display = 'none';
+        document.getElementById('pointSearchInput').value = matches[0].id;
+        focusAndHighlightPoint(matches[0].id);
+    } else {
+        // Якщо декілька - виводимо клікабельний список
+        resultsContainer.innerHTML = '';
+        matches.forEach(match => {
+            const div = document.createElement('div');
+            div.className = 'search-result-item';
+            div.innerText = match.id;
+            div.onclick = () => {
+                document.getElementById('pointSearchInput').value = match.id;
+                resultsContainer.style.display = 'none';
+                focusAndHighlightPoint(match.id);
+            };
+            resultsContainer.appendChild(div);
+        });
+        resultsContainer.style.display = 'flex';
+    }
+};
+
+window.focusAndHighlightPoint = function(pointId) {
+    const pt = filteredPoints.find(p => p.id === pointId);
+    if (!pt) return;
+
+    // Центруємо карту на обраній точці (zoom 14 зазвичай підходить найкраще)
+    map.setView([pt.lat, pt.lng], 14);
+
+    // Видаляємо попередній ореол, якщо він ще світиться
+    if (highlightLayer) {
+        map.removeLayer(highlightLayer);
+    }
+
+    // Створюємо порожній divIcon з класом пульсуючого ореолу
+    const haloIcon = L.divIcon({
+        className: 'highlight-halo',
+        iconSize: [40, 40],
+        iconAnchor: [20, 20] // Центруємо відносно координат
+    });
+
+    // Додаємо на карту. interactive: false гарантує, що він не перекриє клік по самій точці
+    highlightLayer = L.marker([pt.lat, pt.lng], { icon: haloIcon, interactive: false, zIndexOffset: -100 }).addTo(map);
+
+    // Знаходимо реальний маркер і відкриваємо його Popup
+    layers.points.eachLayer(layer => {
+        const latlng = layer.getLatLng();
+        if (latlng.lat === pt.lat && latlng.lng === pt.lng) {
+            // Використовуємо fire('click'), щоб коректно відпрацював Spiderfier
+            layer.fire('click');
+        }
+    });
+
+    // Гасимо ореол через 4 секунди
+    setTimeout(() => {
+        if (highlightLayer) {
+            map.removeLayer(highlightLayer);
+            highlightLayer = null;
+        }
+    }, 4000);
+};
+
+// Сховати результати пошуку при кліку в будь-яке інше місце сторінки
+document.addEventListener('click', function(e) {
+    const searchContainer = document.querySelector('.map-search-container');
+    const filterContainer = document.getElementById('mapFilterContainer');
+    
+    // Закриваємо результати пошуку
+    if (searchContainer && !searchContainer.contains(e.target)) {
+        document.getElementById('pointSearchResults').style.display = 'none';
+    }
+    
+    // Існуюча логіка для фільтру депо
+    if (filterContainer && !filterContainer.contains(e.target)) {
+        document.getElementById('mapFilterMenu').style.display = 'none';
+    }
+});

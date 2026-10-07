@@ -8,7 +8,7 @@
     <!-- 1. Базові стилі та шрифти -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=1.1">
 
     <!-- 2. ОСНОВНА БІБЛІОТЕКА КАРТИ (Повинна бути першою!) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -104,12 +104,24 @@
     
     <div id="rightColumn">
         <div id="map"></div>
-        <div id="mapFilterContainer" class="map-filter-container">
-        <input type="text" id="mapFilterInput" class="smart-input" readonly placeholder="Усі депо (натисніть для вибору)" onclick="toggleFilterMenu()">
-        <div id="mapFilterMenu" class="map-filter-menu" style="display: none;">
-            <!-- Чекбокси згенеруються тут -->
+        
+        <!-- Общий контейнер для элементов управления в правом верхнем углу -->
+        <div class="top-right-controls">
+            <!-- Новое поле поиска отделения -->
+            <div class="map-search-container">
+                <input type="text" id="pointSearchInput" class="smart-input" placeholder="Пошук відділення (від 3 симв.)..." oninput="handleSearchInput(this.value)">
+                <div id="pointSearchResults" class="map-search-results" style="display: none;"></div>
+            </div>
+
+            <!-- Существующий фильтр депо -->
+            <div id="mapFilterContainer" class="map-filter-container">
+                <input type="text" id="mapFilterInput" class="smart-input" readonly placeholder="Усі депо (натисніть для вибору)" onclick="toggleFilterMenu()">
+                <div id="mapFilterMenu" class="map-filter-menu" style="display: none;">
+                    <!-- Чекбокси згенеруються тут -->
+                </div>
+            </div>
         </div>
-    </div>
+        
         <img src="logo3.png" alt="Logo" class="map-floating-logo">
     </div>
 
@@ -148,6 +160,6 @@
             <button class="primary-btn" onclick="applyMassMove()" style="margin-top: 20px;">ПЕРЕНЕСТИ</button>
         </div>
     </div>
-    <script src="script.js"></script>
+    <script src="script.js?v=1.1"></script>
 </body>
 </html>
