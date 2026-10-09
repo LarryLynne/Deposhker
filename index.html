@@ -29,8 +29,12 @@
         
         <div class="card">
             <label>1. Дані Депо (GAS)</label>
-            <!-- Поле вводу видалено, залишаємо тільки кнопку -->
-            <button onclick="fetchDepoData()">Завантажити / Оновити Депо</button>
+            <div class="setting-row">
+                <button onclick="fetchDepoData()" style="flex: 2;">Завантажити / Оновити</button>
+                <button onclick="window.open('https://docs.google.com/spreadsheets/d/1aUoFdPHnuEsLv6LQ3meo5DF2lzXTs5ZOKdAl2guBJjc/edit?gid=0#gid=0', '_blank')" style="flex: 1; border-color: #4ade80; color: #4ade80;" title="Відкрити довідник депо">
+                    Довідник
+                </button>
+            </div>
             <div id="depoStatus" class="status">Очікування...</div>
         </div>
 
