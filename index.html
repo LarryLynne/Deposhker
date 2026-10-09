@@ -94,6 +94,11 @@
                     <input type="number" id="starMaxPoints" value="15" min="1">
                 </div>
             </div>
+            <label style="margin-top: 10px;">Масове керування:</label>
+            <div class="setting-row">
+                <button onclick="toggleAllElements(true)" class="popup-btn btn-green" style="flex: 1;">Увімкнути все</button>
+                <button onclick="toggleAllElements(false)" class="popup-btn btn-red" style="flex: 1;">Вимкнути все</button>
+            </div>
 
             <button class="primary-btn" onclick="runDistribution()">Розподілити</button>
             <button onclick="exportToExcel()" style="margin-top: 10px; border-color: #4ade80; color: #4ade80;">
@@ -160,6 +165,6 @@
             <button class="primary-btn" onclick="applyMassMove()" style="margin-top: 20px;">ПЕРЕНЕСТИ</button>
         </div>
     </div>
-    <script src="script.js?v=1.1"></script>
+    <script src="script.js?v=1.2"></script>
 </body>
 </html>

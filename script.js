@@ -1423,3 +1423,51 @@ document.addEventListener('click', function(e) {
         document.getElementById('mapFilterMenu').style.display = 'none';
     }
 });
+
+// --- МАСОВЕ УВІМКНЕННЯ/ВИМКНЕННЯ ВСІХ ДЕПО ТА ВІДДІЛЕНЬ ---
+window.toggleAllElements = function(turnOn) {
+    let changed = false;
+
+    // 1. Оновлюємо статус усіх депо
+    if (depoData && depoData.length > 0) {
+        depoData.forEach(d => {
+            d.isActive = turnOn;
+        });
+        // Зберігаємо змінений стан у кеш
+        localStorage.setItem('deposhker_depo_cache', JSON.stringify(depoData));
+        changed = true;
+    }
+
+    // 2. Оновлюємо статус усіх відділень
+    if (filteredPoints && filteredPoints.length > 0) {
+        filteredPoints.forEach(pt => {
+            pt.isExcluded = !turnOn;
+            
+            if (!turnOn) {
+                // Якщо вимикаємо — відв'язуємо від депо та зірочок повністю
+                pt.assigned = null;
+                pt.isStar = false;
+                pt.starChildren = 0;
+                pt.assignedStar = null;
+            }
+        });
+        changed = true;
+    }
+
+    if (changed) {
+        // Якщо ми вимкнули все, треба обнулити навантаження в робочому масиві депо
+        if (!turnOn && workingDepo && workingDepo.length > 0) {
+            workingDepo.forEach(d => {
+                d.curDV = 0; 
+                d.curP = 0; 
+                d.curV = 0;
+            });
+        }
+        
+        map.closePopup();
+        // Перемальовуємо карту з урахуванням нових статусів
+        drawMap(workingDepo && workingDepo.length > 0 ? workingDepo : null);
+    } else {
+        alert("Немає завантажених даних для зміни статусу.");
+    }
+};
