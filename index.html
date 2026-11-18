@@ -13,7 +13,7 @@
     <!-- 2. ОСНОВНА БІБЛІОТЕКА КАРТИ (Повинна бути першою!) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- 3. Плагіни для Leaflet (залежать від основного скрипта вище) -->
+    <!-- 3. Плагіни для Leaflet -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/OverlappingMarkerSpiderfier-Leaflet/0.2.6/oms.min.js"></script>
@@ -22,6 +22,7 @@
     <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 </head>
 <body>
     <div id="sidebar">
@@ -45,7 +46,6 @@
                 <div id="fileName">Обрати файл</div>
             </div>
             
-            <!-- Блок вибору аркуша (прихований за замовчуванням) -->
             <div id="sheetSelectionBlock" class="sheet-selection">
                 <label style="font-size: 0.65rem;">Оберіть аркуш із даними:</label>
                 <div class="popup-row" style="margin-bottom: 0;">
@@ -54,7 +54,6 @@
                 </div>
             </div>
 
-            <!-- Посилання на завантаження шаблону -->
             <div style="text-align: right;">
                 <a href="template.xlsx" download class="template-link">📥 Завантажити приклад файлу</a>
             </div>
@@ -82,15 +81,15 @@
                 <label><input type="checkbox" id="chkV"> В</label>
             </div>
 
-            <!-- Налаштування для зірочок -->
             <label style="margin-top: 10px; color: var(--accent);">Налаштування звіздочок:</label>
             <div class="setting-row">
                 <div class="setting-col">
                     <label style="font-size: 0.65rem;">Мін. площа (кв.м):</label>
-                    <input type="number" id="starMinArea" value="150" min="0">
+                    <!-- Добавлено oninput -->
+                    <input type="number" id="starMinArea" value="150" min="0" oninput="if(window.isStarHighlightMode) updateStarHighlights()">
                 </div>
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Макс. звіздочок/Депо:</label>
+                    <label style="font-size: 0.65rem;">Макс. звіздочок:</label>
                     <input type="number" id="starMaxCount" value="15" min="1">
                 </div>
                 <div class="setting-col">
@@ -98,13 +97,29 @@
                     <input type="number" id="starMaxPoints" value="15" min="1">
                 </div>
             </div>
+            
+            <!-- НОВИЙ БЛОК: КЕРУВАННЯ ВІДОБРАЖЕННЯМ ЗОН -->
+            <label style="margin-top: 10px; color: var(--accent);">Відображення полігонів (Зон):</label>
+            <div class="checkbox-group" style="background: var(--bg-sidebar); border: 1px solid var(--border); padding: 8px; border-radius: 4px;">
+                <label><input type="checkbox" id="showDepotZones" checked onchange="drawMap(workingDepo.length ? workingDepo : null)"> Депо</label>
+                <label><input type="checkbox" id="showStarZones" checked onchange="drawMap(workingDepo.length ? workingDepo : null)"> Звіздочки</label>
+            </div>
+            
+            <label style="margin-top: 10px; color: var(--accent);">Глобальний розподіл:</label>
+            <div class="checkbox-group" style="margin-bottom: 5px;">
+                <label><input type="checkbox" id="keepExistingStars" checked> Не чіпати існуючі зірочки</label>
+            </div>
+            <button class="popup-btn btn-yellow" onclick="globalDistributeStars()" style="width: 100%; color: #000;">
+                🌟 Глобальний пошук Звіздочок (Без Депо)
+            </button>
+            
             <label style="margin-top: 10px;">Масове керування:</label>
             <div class="setting-row">
                 <button onclick="toggleAllElements(true)" class="popup-btn btn-green" style="flex: 1;">Увімкнути все</button>
                 <button onclick="toggleAllElements(false)" class="popup-btn btn-red" style="flex: 1;">Вимкнути все</button>
             </div>
 
-            <button class="primary-btn" onclick="runDistribution()">Розподілити</button>
+            <button class="primary-btn" onclick="runDistribution()">Розподілити по Депо</button>
             <button onclick="exportToExcel()" style="margin-top: 10px; border-color: #4ade80; color: #4ade80;">
                 💾 Вивантажити в Excel
             </button>
@@ -114,20 +129,85 @@
     <div id="rightColumn">
         <div id="map"></div>
         
-        <!-- Общий контейнер для элементов управления в правом верхнем углу -->
-        <div class="top-right-controls">
-            <!-- Новое поле поиска отделения -->
-            <div class="map-search-container">
-                <input type="text" id="pointSearchInput" class="smart-input" placeholder="Пошук відділення (від 3 симв.)..." oninput="handleSearchInput(this.value)">
-                <div id="pointSearchResults" class="map-search-results" style="display: none;"></div>
+        <div id="routingRightPanel" class="right-sidebar" style="display: none;">
+            <div class="chart-header" style="margin-bottom: 10px;">
+                <h3 style="color: #facc15; margin: 0;">🚗 Графік руху</h3>
+                <span class="close-btn" onclick="toggleRoutingMode()">✖</span>
+            </div>
+            
+            <div class="routing-settings">
+                <label style="color: #fff; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="routeRoundTrip" onchange="calculateOSRMRoute()" checked> З поверненням на старт
+                </label>
+                
+                <div class="setting-row" style="margin-top: 10px;">
+                    <div class="setting-col">
+                        <label>Час виїзду:</label>
+                        <input type="time" id="routeStartTime" class="smart-input" value="10:00" onchange="recalculateSchedule()">
+                    </div>
+                    <div class="setting-col">
+                        <label>Стоянка (хв):</label>
+                        <input type="number" id="routeDefaultStop" class="smart-input" value="10" min="0" onchange="applyDefaultStopTime()">
+                    </div>
+                </div>
+                <div class="popup-row" style="margin-top: 10px;">
+                    <button class="popup-btn btn-red" onclick="clearRoute()" style="flex:1">Очистити</button>
+                    <button class="popup-btn btn-green" onclick="saveCurrentRoute()" style="flex:1">💾 Зберегти</button>
+                </div>
             </div>
 
-            <!-- Существующий фильтр депо -->
+            <div class="route-table-container">
+                <table class="route-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 25px;">#</th>
+                            <th style="text-align: left;">Вузол</th>
+                            <th style="width: 45px;">Пр.</th>
+                            <th style="width: 45px;">Ст.</th>
+                            <th style="width: 45px;">Ви.</th>
+                            <th style="width: 20px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="routeList"></tbody>
+                    <tfoot id="routeFooter" style="display:none;">
+                        <tr class="return-row">
+                            <td>🔄</td>
+                            <td id="returnNodeName" style="text-align: left; font-weight: bold;">Повернення</td>
+                            <td id="returnArrTime" style="color:#4ade80; font-weight:bold;">--:--</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            
+            <div class="route-summary">
+                <div style="display: flex; justify-content: space-between;">В дорозі: <b id="routeTotalTime" style="color: #facc15;">0 хв</b></div>
+                <div style="display: flex; justify-content: space-between;">Відстань: <b id="routeDist" style="color: #4ade80;">0 км</b></div>
+            </div>
+
+            <hr style="border-color: var(--border); margin: 15px 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <b style="font-size: 0.85rem; color: #94a3b8;">Збережено: <span id="savedRoutesCount" style="color: #38bdf8;">0</span></b>
+                <button class="popup-btn btn-blue" onclick="exportRoutesToExcel()" style="width: auto; margin: 0;">📊 Вивантажити в Excel</button>
+            </div>
+            <div id="savedRoutesList" class="saved-routes-container"></div>
+        </div>
+        
+        <div class="top-left-controls" style="display: flex; gap: 10px;">
+            <button id="btnRoutingToggle" class="popup-btn btn-yellow square-btn" onclick="toggleRoutingMode()" title="Увімкнути/Вимкнути маршрутизацію">🚗</button>
+            <button id="btnStarHighlightToggle" class="popup-btn btn-yellow square-btn" onclick="toggleStarHighlightMode()" title="Підсвітити кандидатів у зірочки">✨</button>
+        </div>
+
+        <div class="top-right-controls">
+            <div class="map-search-container">
+                <input type="text" id="pointSearchInput" class="smart-input top-bar-input" placeholder="Пошук відділення (від 3 симв.)..." oninput="handleSearchInput(this.value)">
+                <div id="pointSearchResults" class="map-search-results" style="display: none;"></div>
+            </div>
             <div id="mapFilterContainer" class="map-filter-container">
-                <input type="text" id="mapFilterInput" class="smart-input" readonly placeholder="Усі депо (натисніть для вибору)" onclick="toggleFilterMenu()">
-                <div id="mapFilterMenu" class="map-filter-menu" style="display: none;">
-                    <!-- Чекбокси згенеруються тут -->
-                </div>
+                <input type="text" id="mapFilterInput" class="smart-input top-bar-input" readonly placeholder="Усі депо (натисніть для вибору)" onclick="toggleFilterMenu()">
+                <div id="mapFilterMenu" class="map-filter-menu" style="display: none;"></div>
             </div>
         </div>
         
@@ -140,7 +220,6 @@
                 <h3 id="chartDepotTitle">Навантаження</h3>
                 <span class="close-btn" onclick="closeChartModal()">✖</span>
             </div>
-            <!-- Вкладки графіка -->
             <div class="chart-tabs">
                 <button class="tab-btn active" data-tab="all" onclick="switchChartTab('all')">Загальна</button>
                 <button class="tab-btn" data-tab="dv" onclick="switchChartTab('dv')">ДВ</button>
@@ -152,7 +231,7 @@
             </div>
         </div>
     </div>
-    <!-- Модалка масового перенесення -->
+    
     <div id="massMoveModal" class="chart-modal-overlay" onclick="if(event.target === this) closeMassMoveModal()">
         <div class="chart-modal-box" style="max-width: 400px; text-align: center;">
             <div class="chart-header">
@@ -165,10 +244,9 @@
             <label style="text-align: left;">Оберіть нове Депо:</label>
             <input list="mass-depo-list" id="massMoveDepoInput" class="smart-input" placeholder="Пошук депо...">
             <datalist id="mass-depo-list"></datalist>
-            
             <button class="primary-btn" onclick="applyMassMove()" style="margin-top: 20px;">ПЕРЕНЕСТИ</button>
         </div>
     </div>
-    <script src="script.js?v=1.2"></script>
+    <script src="script.js?v=1.4"></script>
 </body>
 </html>

@@ -309,3 +309,244 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
     0% { transform: scale(0.7); opacity: 0.5; }
     100% { transform: scale(1.6); opacity: 1; }
 }
+
+/* --- СТИЛИ ДЛЯ МАРШРУТИЗАЦИИ --- */
+.route-item {
+    padding: 8px 10px; 
+    background: var(--bg-body); 
+    border: 1px solid var(--border);
+    margin-bottom: 5px; 
+    border-radius: 4px; 
+    display: flex; 
+    justify-content: space-between;
+    align-items: center;
+    cursor: grab; 
+    color: var(--text-main); 
+    font-size: 0.8rem;
+    transition: 0.2s;
+}
+.route-item:active {
+    cursor: grabbing;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+}
+.route-item.parent-node {
+    background: #1e293b;
+    border-color: #facc15;
+}
+.remove-node {
+    color: #ef4444;
+    cursor: pointer;
+    font-weight: bold;
+    padding: 0 5px;
+}
+.remove-node:hover {
+    color: #ff7878;
+}
+
+/* --- ПРАВА БІЧНА ПАНЕЛЬ МАРШРУТИЗАЦІЇ --- */
+.right-sidebar {
+    position: absolute; right: 0; top: 0; bottom: 0; width: 340px;
+    background: var(--bg-sidebar); border-left: 1px solid var(--border);
+    z-index: 2000; display: flex; flex-direction: column; padding: 15px; box-sizing: border-box;
+    box-shadow: -4px 0 15px rgba(0,0,0,0.5);
+    transition: transform 0.3s ease;
+}
+
+
+.stop-input { 
+    width: 40px; padding: 2px 4px; text-align: center; background: var(--bg-body); 
+    color: #fff; border: 1px solid var(--border); border-radius: 3px; font-family: inherit;
+}
+.stop-input:focus { border-color: var(--accent); outline: none; }
+
+.route-summary { 
+    padding: 10px; background: var(--bg-body); border-radius: 6px; 
+    border: 1px dashed var(--accent); font-size: 0.85rem; color: #fff; 
+}
+
+/* --- АНІМАЦІЯ ЛІНІЇ МАРШРУТУ --- */
+.route-anim {
+    stroke-dasharray: 15, 15;
+    animation: move-route 1.5s linear infinite;
+}
+@keyframes move-route {
+    100% { stroke-dashoffset: -30; }
+}
+
+/* --- ТАБЛИЧНИЙ ДИЗАЙН МАРШРУТУ (EXCEL STYLE) --- */
+.route-table-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    margin: 15px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-body);
+}
+
+.route-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75rem; /* Компактний шрифт */
+    color: var(--text-main);
+}
+
+.route-table th {
+    position: sticky;
+    top: 0;
+    background: #1e293b;
+    color: var(--text-muted);
+    padding: 8px 4px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+}
+
+.route-table td {
+    padding: 6px 4px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+/* Стилі для перетягування (Drag & Drop) */
+.route-table tbody tr {
+    cursor: grab;
+    transition: background 0.2s;
+    background: var(--bg-body);
+}
+.route-table tbody tr:hover { background: var(--bg-sidebar); }
+.route-table tbody tr:active { cursor: grabbing; box-shadow: inset 0 0 8px rgba(0,0,0,0.5); }
+.route-table tbody tr.sortable-ghost { opacity: 0.4; background: #334155; }
+
+/* Виділення материнського вузла (старту) */
+.route-table tbody tr.parent { background: rgba(250, 204, 21, 0.08); }
+.route-table td:nth-child(2) { font-weight: 600; } /* Колонка з назвою вузла */
+
+.stop-input { 
+    width: 35px; padding: 2px; text-align: center; background: var(--bg-sidebar); 
+    color: #fff; border: 1px solid var(--border); border-radius: 3px; font-family: inherit;
+    font-size: 0.75rem;
+}
+.stop-input:focus { border-color: var(--accent); outline: none; }
+
+.remove-node { color: #ef4444; cursor: pointer; font-weight: bold; }
+.remove-node:hover { color: #ff7878; }
+
+/* Рядок повернення на базу */
+.return-row td { background: rgba(56, 189, 248, 0.08); border-top: 2px solid var(--accent); }
+
+/* --- СИЯНИЕ ТОЧЕК В МАРШРУТЕ --- */
+.route-halo {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: rgba(250, 204, 21, 0.7); /* Более плотный цвет */
+    box-shadow: 0 0 12px 6px rgba(250, 204, 21, 0.9); /* Густая тень */
+    animation: pulse-route-halo 1s infinite alternate ease-in-out;
+}
+
+/* Сияние для точек, которые уже в сохраненных маршрутах */
+.saved-halo {
+    background: rgba(74, 222, 128, 0.6); 
+    box-shadow: 0 0 12px 6px rgba(74, 222, 128, 0.8);
+}
+
+@keyframes pulse-route-halo {
+    0% { transform: scale(1); opacity: 0.6; }
+    100% { transform: scale(1.8); opacity: 1; }
+}
+
+/* --- ВИРІВНЮВАННЯ НАЛАШТУВАНЬ МАРШРУТУ --- */
+.routing-settings .setting-row {
+    display: flex;
+    gap: 15px;
+    align-items: flex-end; /* Вирівнювання по нижньому краю інпутів */
+}
+.routing-settings .setting-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.routing-settings label {
+    margin-bottom: 5px;
+}
+.routing-settings .smart-input {
+    margin-bottom: 0; /* Прибираємо зайвий відступ знизу */
+    height: 32px;
+}
+
+/* --- АНІМАЦІЯ ЛОГОТИПА --- */
+.map-floating-logo {
+    transition: right 0.3s ease; /* Плавний рух */
+}
+
+/* --- СПИСОК ЗБЕРЕЖЕНИХ ЛАНЦЮЖКІВ --- */
+.saved-routes-container {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+.saved-route-item {
+    background: #1e293b;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 0.75rem;
+    color: #f1f5f9;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: 0.2s;
+}
+.saved-route-item:hover {
+    border-color: var(--accent);
+    background: #0f172a;
+}
+.saved-route-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+    font-weight: bold;
+    color: var(--accent);
+}
+
+/* --- КЕРУВАННЯ ВЕРХНЬОЮ ПАНЕЛЛЮ НА КАРТІ --- */
+.top-left-controls {
+    position: absolute;
+    top: 5px;
+    left: 55px; /* Розташування біля лівої панелі */
+    z-index: 1000;
+}
+
+.square-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+}
+
+/* Вирівнювання висоти полів пошуку і фільтру */
+.top-bar-input {
+    height: 36px !important; /* Жорстко фіксуємо висоту обох полів */
+    margin: 0 !important;
+    box-sizing: border-box;
+    line-height: normal;
+}
+
+.top-right-controls {
+    position: absolute;
+    top: 15px;
+    right: 55px; /* Трохи відступили від правого краю, щоб не перекривати кнопки зуму +- */
+    z-index: 1000;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start; /* Вирівнюємо по верхньому краю */
+}
