@@ -63,65 +63,56 @@
 
         <div class="card">
             <label>3. Налаштування</label>
+            
+            <!-- Час та вантаж -->
             <div class="setting-row">
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Година (Від):</label>
+                    <label class="tooltip-label" title="Початкова година для розрахунку">Від (год): <span class="info-icon">?</span></label>
                     <input type="number" id="hourStart" value="10" min="0" max="23">
                 </div>
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Година (До):</label>
+                    <label class="tooltip-label" title="Кінцева година для розрахунку">До (год): <span class="info-icon">?</span></label>
                     <input type="number" id="hourEnd" value="12" min="0" max="23">
                 </div>
             </div>
             
-            <label style="margin-top: 10px;">Типи вантажу:</label>
-            <div class="checkbox-group">
-                <label><input type="checkbox" id="chkDV" checked> ДВ</label>
-                <label><input type="checkbox" id="chkP" checked> П</label>
-                <label><input type="checkbox" id="chkV"> В</label>
+            <div class="checkbox-group" style="margin-top: 10px;">
+                <label class="tooltip-label" title="Враховувати ДВ"><input type="checkbox" id="chkDV" checked> ДВ</label>
+                <label class="tooltip-label" title="Враховувати П"><input type="checkbox" id="chkP" checked> П</label>
+                <label class="tooltip-label" title="Враховувати В"><input type="checkbox" id="chkV"> В</label>
             </div>
 
-            <label style="margin-top: 10px; color: var(--accent);">Налаштування звіздочок:</label>
+            <hr class="divider">
+
+            <!-- Параметри зірочок -->
+            <label>Генерація Звіздочок</label>
             <div class="setting-row">
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Мін. площа (кв.м):</label>
-                    <!-- Добавлено oninput -->
+                    <label class="tooltip-label" title="Мінімальна площа приміщення відділення для того, щоб воно могло стати зірочкою">Мін. площа: <span class="info-icon">?</span></label>
                     <input type="number" id="starMinArea" value="150" min="0" oninput="if(window.isStarHighlightMode) updateStarHighlights()">
                 </div>
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Макс. звіздочок:</label>
+                    <label class="tooltip-label" title="Максимальна кількість зірочок, яку може згенерувати алгоритм">Макс. шт: <span class="info-icon">?</span></label>
                     <input type="number" id="starMaxCount" value="15" min="1">
                 </div>
                 <div class="setting-col">
-                    <label style="font-size: 0.65rem;">Відділень/Звіздочку:</label>
+                    <label class="tooltip-label" title="Максимальна кількість відділень, що можуть бути прив'язані до однієї зірочки">Ліміт підлеглих: <span class="info-icon">?</span></label>
                     <input type="number" id="starMaxPoints" value="15" min="1">
                 </div>
             </div>
             
-            <!-- НОВИЙ БЛОК: КЕРУВАННЯ ВІДОБРАЖЕННЯМ ЗОН -->
-            <label style="margin-top: 10px; color: var(--accent);">Відображення полігонів (Зон):</label>
-            <div class="checkbox-group" style="background: var(--bg-sidebar); border: 1px solid var(--border); padding: 8px; border-radius: 4px;">
-                <label><input type="checkbox" id="showDepotZones" checked onchange="drawMap(workingDepo.length ? workingDepo : null)"> Депо</label>
-                <label><input type="checkbox" id="showStarZones" checked onchange="drawMap(workingDepo.length ? workingDepo : null)"> Звіздочки</label>
-            </div>
-            
-            <label style="margin-top: 10px; color: var(--accent);">Глобальний розподіл:</label>
-            <div class="checkbox-group" style="margin-bottom: 5px;">
-                <label><input type="checkbox" id="keepExistingStars" checked> Не чіпати існуючі зірочки</label>
+            <div class="checkbox-group" style="margin: 10px 0;">
+                <label><input type="checkbox" id="keepExistingStars" checked> Зберегти існуючі зірочки</label>
             </div>
             <button class="popup-btn btn-yellow" onclick="globalDistributeStars()" style="width: 100%; color: #000;">
-                🌟 Глобальний пошук Звіздочок (Без Депо)
+                Глобальний пошук (Без Депо)
             </button>
             
-            <label style="margin-top: 10px;">Масове керування:</label>
-            <div class="setting-row">
-                <button onclick="toggleAllElements(true)" class="popup-btn btn-green" style="flex: 1;">Увімкнути все</button>
-                <button onclick="toggleAllElements(false)" class="popup-btn btn-red" style="flex: 1;">Вимкнути все</button>
-            </div>
+            <hr class="divider">
 
             <button class="primary-btn" onclick="runDistribution()">Розподілити по Депо</button>
             <button onclick="exportToExcel()" style="margin-top: 10px; border-color: #4ade80; color: #4ade80;">
-                💾 Вивантажити в Excel
+                Вивантажити в Excel
             </button>
         </div>
     </div>
@@ -195,9 +186,30 @@
             <div id="savedRoutesList" class="saved-routes-container"></div>
         </div>
         
-        <div class="top-left-controls" style="display: flex; gap: 10px;">
-            <button id="btnRoutingToggle" class="popup-btn btn-yellow square-btn" onclick="toggleRoutingMode()" title="Увімкнути/Вимкнути маршрутизацію">🚗</button>
-            <button id="btnStarHighlightToggle" class="popup-btn btn-yellow square-btn" onclick="toggleStarHighlightMode()" title="Підсвітити кандидатів у зірочки">✨</button>
+        <div class="top-left-controls">
+            <!-- ВЕРХНІЙ РЯД: Всі кастомні кнопки -->
+            <div class="map-controls-row">
+                <div class="map-tools-group">
+                    <button id="btnRoutingToggle" class="map-icon-btn" onclick="toggleRoutingMode()" title="Режим маршрутизації">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    </button>
+                    <button id="btnStarHighlightToggle" class="map-icon-btn" onclick="toggleStarHighlightMode()" title="Підсвітити кандидатів у зірочки">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+                    </button>
+                    <!-- Кнопка живлення для Депо -->
+                    <button id="btnToggleAllDepots" class="map-icon-btn active" onclick="toggleAllDepotsState()" title="Увімкнути/Вимкнути всі депо" style="color: #4ade80;">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                    </button>
+                    <!-- Кнопки зон -->
+                    <button id="btnToggleDepotZones" class="map-icon-btn active" onclick="toggleZoneVisibility('depot')" title="Показати/Приховати зони Депо">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"></polygon><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
+                    <button id="btnToggleStarZones" class="map-icon-btn active" onclick="toggleZoneVisibility('star')" title="Показати/Приховати зони Звіздочок">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+                    </button>
+                </div>
+            </div>
+            <!-- НИЖНІЙ РЯД для панелі малювання додасться автоматично через JS -->
         </div>
 
         <div class="top-right-controls">

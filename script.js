@@ -12,6 +12,26 @@ let rawPointsData = [];
 let filteredPoints = [];
 let workingDepo = [];
 let areaData = [];
+window.showDepotZones = true;
+window.showStarZones = true;
+
+// --- КЕРУВАННЯ ВІДОБРАЖЕННЯМ ЗОН НА КАРТІ ---
+window.toggleZoneVisibility = function(type) {
+    if (type === 'depot') {
+        window.showDepotZones = !window.showDepotZones;
+        const btn = document.getElementById('btnToggleDepotZones');
+        if (window.showDepotZones) btn.classList.add('active');
+        else btn.classList.remove('active');
+    } else if (type === 'star') {
+        window.showStarZones = !window.showStarZones;
+        const btn = document.getElementById('btnToggleStarZones');
+        if (window.showStarZones) btn.classList.add('active');
+        else btn.classList.remove('active');
+    }
+    
+    // Перемальовуємо карту з новими налаштуваннями видимості
+    drawMap(workingDepo.length ? workingDepo : null);
+};
 
 window.activeDepotFilters = new Set(); // Порожній = показувати всі
 
@@ -71,6 +91,16 @@ function initMap() {
         edit: { featureGroup: drawnItems, remove: true }
     });
     map.addControl(drawControl);
+
+    setTimeout(() => {
+        const drawToolbar = document.querySelector('.leaflet-draw');
+        if (drawToolbar) {
+            const secondRow = document.createElement('div');
+            secondRow.className = 'map-controls-row';
+            secondRow.appendChild(drawToolbar);
+            document.querySelector('.top-left-controls').appendChild(secondRow);
+        }
+    }, 100);
 
     map.on(L.Draw.Event.CREATED, function (e) {
         drawnItems.clearLayers(); 
@@ -296,7 +326,7 @@ window.processSelectedSheet = function(sheetNameFromArg = null) {
     }
 };
 
-function runDistribution() {
+window.runDistribution = function() {
     if (depoData.length === 0 || rawPointsData.length === 0) return alert("Завантажте дані депо та відділень!");
 
     const hStart = parseInt(document.getElementById('hourStart').value);
@@ -319,21 +349,42 @@ function runDistribution() {
     if (filteredPoints.length > 0) {
         filteredPoints.forEach(p => {
             if (p.isStar || p.assignedStar) {
-                starsConfig[p.id] = { isStar: p.isStar, isApprovedStar: p.isApprovedStar, assignedStar: p.assignedStar, starColor: p.starColor, starChildren: p.starChildren };
+                starsConfig[p.id] = { 
+                    isStar: p.isStar, 
+                    isApprovedStar: p.isApprovedStar, 
+                    assignedStar: p.assignedStar, 
+                    starColor: p.starColor, 
+                    starChildren: p.starChildren 
+                };
             }
         });
     }
 
     const aggregated = {};
-    rawPointsData.forEach(r => {
-        if (!aggregated[r.id]) aggregated[r.id] = { id: r.id, lat: r.lat, lng: r.lng, dv: 0, p: 0, v: 0, assigned: null };
-    });
+    
+    // 1. БЕРЕМО ВСІ ІСНУЮЧІ ВІДДІЛЕННЯ (щоб вони не зникали, навіть якщо в них немає трафіку)
+    if (filteredPoints.length > 0) {
+        filteredPoints.forEach(p => {
+            aggregated[p.id] = { id: p.id, lat: p.lat, lng: p.lng, dv: 0, p: 0, v: 0, assigned: null };
+        });
+    }
 
+    // 2. Додаємо відділення з сирих даних (на випадок, якщо там є щось нове)
     rawPointsData.forEach(r => {
-        if (r.hour >= hStart && r.hour <= hEnd) {
-            aggregated[r.id].dv += r.dv || 0; aggregated[r.id].p += r.p || 0; aggregated[r.id].v += r.v || 0;
+        if (!aggregated[r.id]) {
+            aggregated[r.id] = { id: r.id, lat: r.lat, lng: r.lng, dv: 0, p: 0, v: 0, assigned: null };
         }
     });
+
+    // 3. Рахуємо навантаження за вказаний діапазон годин
+    rawPointsData.forEach(r => {
+        if (r.hour >= hStart && r.hour <= hEnd) {
+            aggregated[r.id].dv += r.dv || 0; 
+            aggregated[r.id].p += r.p || 0; 
+            aggregated[r.id].v += r.v || 0;
+        }
+    });
+    
     filteredPoints = Object.values(aggregated);
 
     filteredPoints.forEach(p => {
@@ -347,16 +398,40 @@ function runDistribution() {
         }
     });
 
-    workingDepo = depoData.filter(d => d.isActive !== false).map((d, i) => ({
+    // ВИПРАВЛЕННЯ: Тепер для розподілу ми беремо ТІЛЬКИ ті депо, які відповідають поточному фільтру на карті!
+    workingDepo = depoData.filter(d => {
+        if (d.isActive === false) return false;
+        // Якщо увімкнено фільтр на карті - ігноруємо приховані депо
+        if (window.activeDepotFilters.size > 0 && !window.activeDepotFilters.has(d['Вузол'])) return false;
+        return true;
+    }).map((d, i) => ({
         ...d, color: distinctColors[i % distinctColors.length],
         capDV: (parseFloat(d['ДВ']) || 0) * hoursMultiplier, capP: (parseFloat(d['П']) || 0) * hoursMultiplier, capV: (parseFloat(d['В']) || 0) * hoursMultiplier,
         curDV: 0, curP: 0, curV: 0
     }));
 
+    if (workingDepo.length === 0) return alert("Немає активних депо для розподілу. Перевірте фільтр депо у правому верхньому куті.");
+
     workingDepo.sort((a, b) => b['Широта'] - a['Широта']);
 
+    // Рахуємо сумарне навантаження зірок разом з їхніми дітьми
+    const starLoads = {};
+    filteredPoints.forEach(p => {
+        if (p.isStar) starLoads[p.id] = { dv: p.dv, p: p.p, v: p.v };
+    });
+    filteredPoints.forEach(p => {
+        if (p.assignedStar && starLoads[p.assignedStar]) {
+            starLoads[p.assignedStar].dv += p.dv;
+            starLoads[p.assignedStar].p += p.p;
+            starLoads[p.assignedStar].v += p.v;
+        }
+    });
+
+    // Формуємо пари тільки для "самостійних" точок (Зірки + Відділення без зірок). Дітей пропускаємо.
     let pairs = [];
     filteredPoints.forEach(pt => {
+        if (pt.assignedStar) return; 
+        
         const ptGeo = turf.point([pt.lng, pt.lat]);
         workingDepo.forEach(depo => {
             const dist = turf.distance(ptGeo, turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
@@ -369,37 +444,78 @@ function runDistribution() {
     for (let pair of pairs) {
         let { pt, depo } = pair;
         if (pt.assigned || pt.isExcluded) continue; 
+        
+        let loadDV = pt.isStar ? starLoads[pt.id].dv : pt.dv;
+        let loadP  = pt.isStar ? starLoads[pt.id].p : pt.p;
+        let loadV  = pt.isStar ? starLoads[pt.id].v : pt.v;
+
         let hitLimit = false;
-        if (useDV && (depo.curDV + pt.dv > depo.capDV)) hitLimit = true;
-        if (useP && (depo.curP + pt.p > depo.capP)) hitLimit = true;
-        if (useV && (depo.curV + pt.v > depo.capV)) hitLimit = true;
+        if (useDV && (depo.curDV + loadDV > depo.capDV)) hitLimit = true;
+        if (useP && (depo.curP + loadP > depo.capP)) hitLimit = true;
+        if (useV && (depo.curV + loadV > depo.capV)) hitLimit = true;
+        
         if (!hitLimit) {
-            pt.assigned = depo['Вузол']; pt.color = depo.color;
-            depo.curDV += pt.dv; depo.curP += pt.p; depo.curV += pt.v;
+            pt.assigned = depo['Вузол']; 
+            pt.color = depo.color;
+            depo.curDV += loadDV; 
+            depo.curP += loadP; 
+            depo.curV += loadV;
+            
+            // Якщо це зірка — автоматично затягуємо всіх її дітей в це ж депо
+            if (pt.isStar) {
+                filteredPoints.forEach(child => {
+                    // Сувора перевірка, щоб уникнути помилок з типами даних
+                    if (String(child.assignedStar) === String(pt.id)) {
+                        child.assigned = depo['Вузол'];
+                        child.color = depo.color;
+                    }
+                });
+            }
         }
     }
 
-    let remainders = filteredPoints.filter(p => !p.assigned && !p.isExcluded);
+    // Розподіл залишків
+    let remainders = filteredPoints.filter(p => !p.assigned && !p.isExcluded && !p.assignedStar);
     remainders.forEach(pt => {
         const ptGeo = turf.point([pt.lng, pt.lat]);
         let bestDepo = null, bestScore = Infinity;
+        
+        let loadDV = pt.isStar ? starLoads[pt.id].dv : pt.dv;
+        let loadP  = pt.isStar ? starLoads[pt.id].p : pt.p;
+        let loadV  = pt.isStar ? starLoads[pt.id].v : pt.v;
+
         workingDepo.forEach(depo => {
             const dist = turf.distance(ptGeo, turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
             let maxOverload = 0;
-            if (useDV && depo.capDV > 0) maxOverload = Math.max(maxOverload, depo.curDV / depo.capDV);
-            if (useP && depo.capP > 0) maxOverload = Math.max(maxOverload, depo.curP / depo.capP);
-            if (useV && depo.capV > 0) maxOverload = Math.max(maxOverload, depo.curV / depo.capV);
+            if (useDV && depo.capDV > 0) maxOverload = Math.max(maxOverload, (depo.curDV + loadDV) / depo.capDV);
+            if (useP && depo.capP > 0) maxOverload = Math.max(maxOverload, (depo.curP + loadP) / depo.capP);
+            if (useV && depo.capV > 0) maxOverload = Math.max(maxOverload, (depo.curV + loadV) / depo.capV);
+            
             const penalty = Math.pow(Math.max(0, maxOverload - 1), 2) * 50; 
             const score = dist * (1 + penalty);
             if (score < bestScore) { bestScore = score; bestDepo = depo; }
         });
+        
         if (bestDepo) {
-            pt.assigned = bestDepo['Вузол']; pt.color = bestDepo.color;
-            bestDepo.curDV += pt.dv; bestDepo.curP += pt.p; bestDepo.curV += pt.v;
+            pt.assigned = bestDepo['Вузол']; 
+            pt.color = bestDepo.color;
+            bestDepo.curDV += loadDV; 
+            bestDepo.curP += loadP; 
+            bestDepo.curV += loadV;
+            
+            if (pt.isStar) {
+                filteredPoints.forEach(child => {
+                    if (String(child.assignedStar) === String(pt.id)) {
+                        child.assigned = bestDepo['Вузол'];
+                        child.color = bestDepo.color;
+                    }
+                });
+            }
         }
     });
+    
     drawMap(workingDepo);
-}
+};
 
 window.exportToExcel = function() {
     if (!filteredPoints || filteredPoints.length === 0) return alert("Немає даних для вивантаження! Спочатку завантажте файл.");
@@ -813,26 +929,36 @@ function drawMap(processedDepo = null) {
     
     oms.clearMarkers(); 
 
-    const showDepotZones = document.getElementById('showDepotZones') ? document.getElementById('showDepotZones').checked : true;
-    const showStarZones = document.getElementById('showStarZones') ? document.getElementById('showStarZones').checked : true;
+    const showDepotZones = window.showDepotZones;
+    const showStarZones = window.showStarZones;
 
+    // 1. ПОЛІГОНИ ДЕПО
     if (processedDepo && showDepotZones) {
         processedDepo.forEach(depo => {
             if (window.activeDepotFilters.size > 0 && !window.activeDepotFilters.has(depo['Вузол'])) return;
-            const depoPoints = filteredPoints.filter(p => p.assigned === depo['Вузол'] && !p.isStar && !p.assignedStar);
+            
+            const depoPoints = filteredPoints.filter(p => p.assigned === depo['Вузол']);
+            
             if (depoPoints.length >= 3) {
-                const pts = depoPoints.map(p => turf.point([p.lng, p.lat]));
-                pts.push(turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
-                let hull = turf.convex(turf.featureCollection(pts));
-                if (hull) {
-                    hull = turf.buffer(hull, 0.3, { units: 'kilometers' });
-                    hull = turf.polygonSmooth(hull, { iterations: 2 });
-                    L.geoJSON(hull, { style: { color: depo.color, weight: 4, opacity: 1, fillOpacity: 0.3 } }).addTo(layers.polygons);
+                try {
+                    const pts = depoPoints.map(p => turf.point([p.lng, p.lat]));
+                    pts.push(turf.point([parseFloat(depo['Довгота']), parseFloat(depo['Широта'])]));
+                    let hull = turf.convex(turf.featureCollection(pts));
+                    
+                    // Перевіряємо, чи повернувся саме полігон, щоб уникнути помилок згладжування
+                    if (hull && hull.geometry && (hull.geometry.type === 'Polygon' || hull.geometry.type === 'MultiPolygon')) {
+                        hull = turf.buffer(hull, 0.3, { units: 'kilometers' });
+                        hull = turf.polygonSmooth(hull, { iterations: 2 });
+                        L.geoJSON(hull, { style: { color: depo.color, weight: 4, opacity: 1, fillOpacity: 0.3 } }).addTo(layers.polygons);
+                    }
+                } catch (e) {
+                    console.warn("Помилка побудови полігону Депо для: " + depo['Вузол'], e);
                 }
             }
         });
     }
 
+    // 2. ПОЛІГОНИ ЗІРОК
     if (showStarZones) {
         const allStars = filteredPoints.filter(p => p.isStar);
         allStars.forEach(star => {
@@ -840,19 +966,26 @@ function drawMap(processedDepo = null) {
 
             const starChildren = filteredPoints.filter(p => p.assignedStar === star.id);
             if (starChildren.length >= 2) { 
-                const pts = starChildren.map(p => turf.point([p.lng, p.lat]));
-                pts.push(turf.point([star.lng, star.lat]));
-                let hull = turf.convex(turf.featureCollection(pts));
-                if (hull) {
-                    hull = turf.buffer(hull, 0.2, { units: 'kilometers' });
-                    hull = turf.polygonSmooth(hull, { iterations: 2 });
-                    const polyColor = star.starColor || star.color || '#eab308';
-                    L.geoJSON(hull, { style: { color: polyColor, weight: 3, opacity: 1, fillOpacity: 0.2, dashArray: '5,5' } }).addTo(layers.polygons);
+                try {
+                    const pts = starChildren.map(p => turf.point([p.lng, p.lat]));
+                    pts.push(turf.point([star.lng, star.lat]));
+                    let hull = turf.convex(turf.featureCollection(pts));
+                    
+                    // Захист від лінійних (колінеарних) фігур
+                    if (hull && hull.geometry && (hull.geometry.type === 'Polygon' || hull.geometry.type === 'MultiPolygon')) {
+                        hull = turf.buffer(hull, 0.2, { units: 'kilometers' });
+                        hull = turf.polygonSmooth(hull, { iterations: 2 });
+                        const polyColor = star.starColor || star.color || '#eab308';
+                        L.geoJSON(hull, { style: { color: polyColor, weight: 3, opacity: 1, fillOpacity: 0.2, dashArray: '5,5' } }).addTo(layers.polygons);
+                    }
+                } catch (e) {
+                    console.warn("Помилка побудови полігону Зірочки: " + star.id, e);
                 }
             }
         });
     }
 
+    // 3. МАРКЕРИ ДЕПО
     depoData.forEach(d => {
         if (window.activeDepotFilters.size > 0 && !window.activeDepotFilters.has(d['Вузол'])) return;
         const isOff = d.isActive === false;
@@ -897,6 +1030,7 @@ function drawMap(processedDepo = null) {
         layers.depo.addLayer(marker); oms.addMarker(marker); 
     });
 
+    // 4. МАРКЕРИ ВІДДІЛЕНЬ ТА ЗІРОК
     filteredPoints.forEach(p => {
         if (window.activeDepotFilters.size > 0 && p.assigned && !window.activeDepotFilters.has(p.assigned)) return;
         const isZero = (p.dv + p.p + p.v) === 0;
@@ -1242,18 +1376,29 @@ document.addEventListener('click', function(e) {
 });
 
 window.toggleAllElements = function(turnOn) {
-    let changed = false;
-    if (depoData && depoData.length > 0) { depoData.forEach(d => { d.isActive = turnOn; }); localStorage.setItem('deposhker_depo_cache', JSON.stringify(depoData)); changed = true; }
+    if (!depoData || depoData.length === 0) return alert("Немає завантажених даних Депо для зміни статусу.");
+
+    // 1. Вмикаємо/вимикаємо ТІЛЬКИ депо
+    depoData.forEach(d => { d.isActive = turnOn; });
+    localStorage.setItem('deposhker_depo_cache', JSON.stringify(depoData));
+
+    // 2. Якщо точки вже були завантажені
     if (filteredPoints && filteredPoints.length > 0) {
-        filteredPoints.forEach(pt => {
-            pt.isExcluded = !turnOn;
-            if (!turnOn) { pt.assigned = null; pt.isStar = false; pt.isApprovedStar = false; pt.starChildren = 0; pt.assignedStar = null; pt.starColor = null; }
-        }); changed = true;
+        // Скидаємо лише прив'язку відділень до депо. 
+        // Їхній статус звіздочок або виключення (isExcluded) залишається без змін!
+        filteredPoints.forEach(p => { 
+            p.assigned = null; 
+            // Повертаємо базовий колір тим, хто не є зіркою чи підлеглим
+            if (!p.isStar && !p.assignedStar) {
+                p.color = '#64748b'; 
+            }
+        });
+        
+        // Запускаємо перерозподіл (він автоматично розкидає точки по увімкненим Депо, або залишить їх без депо, якщо всі вимкнені)
+        runDistribution(); 
+    } else {
+        drawMap();
     }
-    if (changed) {
-        if (!turnOn && workingDepo && workingDepo.length > 0) { workingDepo.forEach(d => { d.curDV = 0; d.curP = 0; d.curV = 0; }); }
-        map.closePopup(); drawMap(workingDepo && workingDepo.length > 0 ? workingDepo : null);
-    } else { alert("Немає завантажених даних для зміни статусу."); }
 };
 
 window.isRoutingMode = false; window.routeNodes = []; window.osrmLegs = []; window.savedRoutes = []; let routeSortableInst = null;
@@ -1261,11 +1406,13 @@ window.toggleRoutingMode = function() {
     window.isRoutingMode = !window.isRoutingMode;
     const btn = document.getElementById('btnRoutingToggle'); const panel = document.getElementById('routingRightPanel'); const logo = document.querySelector('.map-floating-logo');
     if (window.isRoutingMode) {
-        btn.style.background = '#ef4444'; btn.style.color = '#fff'; btn.style.borderColor = '#ef4444'; btn.innerHTML = '🛑'; panel.style.display = 'flex';
+        btn.classList.add('active'); // CSS сделает SVG красным
+        panel.style.display = 'flex';
         if (logo) logo.style.right = '365px'; map.closePopup(); updateRouteHalos();
         if (!routeSortableInst) { routeSortableInst = new Sortable(document.getElementById('routeList'), { animation: 150, onEnd: function() { rebuildRouteArrayFromDOM(); calculateOSRMRoute(); } }); }
     } else {
-        btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = ''; btn.innerHTML = '🚗'; panel.style.display = 'none';
+        btn.classList.remove('active');
+        panel.style.display = 'none';
         if (logo) logo.style.right = '25px'; clearRoute();
     }
 };
@@ -1472,8 +1619,8 @@ window.toggleStarHighlightMode = function() {
     const btn = document.getElementById('btnStarHighlightToggle');
     
     if (window.isStarHighlightMode) {
-        btn.style.background = '#eab308'; // Активний жовтий колір
-        btn.style.color = '#000';
+        btn.classList.toggle('active'); // Активний жовтий колір
+        //btn.style.color = '#000';
         updateStarHighlights();
     } else {
         btn.style.background = '';
@@ -1482,6 +1629,25 @@ window.toggleStarHighlightMode = function() {
             layers.potentialStarHalos.clearLayers();
         }
     }
+};
+
+// --- ГЛОБАЛЬНЕ УВІМКНЕННЯ / ВИМКНЕННЯ ---
+window.allElementsActive = true; // За замовчуванням усе ввімкнено
+
+window.toggleAllDepotsState = function() {
+    window.allElementsActive = !window.allElementsActive;
+    const btn = document.getElementById('btnToggleAllDepots');
+    
+    if (window.allElementsActive) {
+        btn.classList.add('active');
+        btn.style.color = '#4ade80'; // Зелений, коли увімкнено
+    } else {
+        btn.classList.remove('active');
+        btn.style.color = '#ef4444'; // Червоний, коли вимкнено
+    }
+    
+    // Викликаємо твою існуючу логіку
+    toggleAllElements(window.allElementsActive);
 };
 
 window.updateStarHighlights = function() {

@@ -516,10 +516,13 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
 
 /* --- КЕРУВАННЯ ВЕРХНЬОЮ ПАНЕЛЛЮ НА КАРТІ --- */
 .top-left-controls {
-    position: absolute;
-    top: 5px;
-    left: 55px; /* Розташування біля лівої панелі */
+    position: absolute; 
+    top: 15px; 
+    left: 55px; 
     z-index: 1000;
+    display: flex; 
+    flex-direction: column; 
+    gap: 8px; /* Відстань між верхнім і нижнім рядами */
 }
 
 .square-btn {
@@ -549,4 +552,114 @@ button:hover { background: var(--btn-hover); border-color: var(--text-muted); }
     display: flex;
     gap: 10px;
     align-items: flex-start; /* Вирівнюємо по верхньому краю */
+}
+
+/* --- НОВІ ІКОНКИ НА КАРТІ ТА ТУЛТИПИ --- */
+.divider { border: 0; height: 1px; background: var(--border); margin: 15px 0; }
+
+.tooltip-label {
+    display: flex; align-items: center; gap: 4px;
+    cursor: help;
+}
+
+.info-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; background: var(--border); color: var(--text-muted);
+    border-radius: 50%; font-size: 9px; font-weight: bold;
+}
+
+.map-controls-row {
+    display: flex; flex-direction: row; gap: 5px; /* Блоки кнопок в один ряд */
+}
+
+.map-tools-group {
+    display: flex; 
+    flex-direction: row; 
+    gap: 8px;
+    background: transparent; 
+    padding: 0;
+    border: none;
+    box-shadow: none;
+}
+
+.map-icon-btn {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-sidebar) !important; /* Єдиний темний фон для всіх */
+    border: 1px solid var(--border) !important;
+    border-radius: 4px;
+    color: var(--text-muted); 
+    cursor: pointer; 
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+}
+
+.map-icon-btn:hover { 
+    background: var(--bg-body) !important; 
+    color: var(--text-main); 
+}
+
+.map-icon-btn.active { color: var(--accent); border-color: var(--accent) !important; }
+#btnStarHighlightToggle.active { color: #eab308; border-color: #eab308 !important; }
+#btnRoutingToggle.active { color: #ef4444; border-color: #ef4444 !important; }
+#btnToggleAllDepots.active { color: #4ade80; border-color: #4ade80 !important; }
+
+/* --- ПЕРЕТВОРЕННЯ ПАНЕЛІ LEAFLET DRAW НА ГОРИЗОНТАЛЬНУ --- */
+/* --- 2. НИЖНІЙ РЯД: ЛІНІЙНА ПАНЕЛЬ LEAFLET DRAW --- */
+/* Головний контейнер плагіна розтягуємо в рядок */
+.leaflet-draw { 
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    margin: 0 !important; 
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Секції малювання та редагування також ставимо в рядок */
+.leaflet-draw-section {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    margin: 0 !important;
+}
+
+/* Прибираємо стандартні стилі тулбару Leaflet */
+.leaflet-draw-toolbar.leaflet-bar {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+/* Стилізуємо кожну кнопку малювання */
+.leaflet-draw-toolbar.leaflet-bar a {
+    display: block !important;
+    width: 36px !important;
+    height: 36px !important;
+    
+    /* ХИТРІСТЬ ІНВЕРСІЇ: задаємо світлі кольори, щоб після filter: invert() вони стали нашими темними! */
+    background-color: #e1d6c4 !important; /* Після інверсії стане var(--bg-sidebar) #1e293b */
+    border: 1px solid #ccbeaa !important; /* Після інверсії стане var(--border) #334155 */
+    box-shadow: 0 4px 15px rgba(255, 255, 255, 0.6) !important; /* Біла тінь після інверсії стане чорною */
+    
+    border-radius: 4px !important;
+    margin: 0 !important; 
+    
+    /* Інвертуємо елемент: чорні іконки стають білими, а світлий фон стає нашим темним */
+    filter: invert(1) opacity(0.7) !important; 
+}
+
+.leaflet-draw-toolbar.leaflet-bar a:hover {
+    background-color: #f0e8d5 !important; /* Після інверсії стане var(--bg-body) #0f172a */
+    filter: invert(1) opacity(1) !important; 
+}
+
+/* Меню дій (Зберегти/Скасувати) при малюванні */
+.leaflet-draw-actions {
+    left: 0 !important;
+    top: 45px !important;
 }
